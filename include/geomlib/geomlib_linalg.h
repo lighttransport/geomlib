@@ -156,6 +156,16 @@ geomlib_mat4 geomlib_mat4_ortho(float left, float right, float bottom, float top
  * Double-precision variants (selected operations)
  * ============================================================================ */
 
+/* Vector2 double-precision */
+geomlib_vec2d geomlib_vec2d_create(double x, double y);
+geomlib_vec2d geomlib_vec2d_add(geomlib_vec2d a, geomlib_vec2d b);
+geomlib_vec2d geomlib_vec2d_sub(geomlib_vec2d a, geomlib_vec2d b);
+geomlib_vec2d geomlib_vec2d_mul(geomlib_vec2d v, double s);
+double geomlib_vec2d_dot(geomlib_vec2d a, geomlib_vec2d b);
+double geomlib_vec2d_length(geomlib_vec2d v);
+geomlib_vec2d geomlib_vec2d_normalize(geomlib_vec2d v);
+
+/* Vector3 double-precision */
 geomlib_vec3d geomlib_vec3d_create(double x, double y, double z);
 geomlib_vec3d geomlib_vec3d_add(geomlib_vec3d a, geomlib_vec3d b);
 geomlib_vec3d geomlib_vec3d_sub(geomlib_vec3d a, geomlib_vec3d b);
@@ -165,6 +175,7 @@ geomlib_vec3d geomlib_vec3d_cross(geomlib_vec3d a, geomlib_vec3d b);
 double geomlib_vec3d_length(geomlib_vec3d v);
 geomlib_vec3d geomlib_vec3d_normalize(geomlib_vec3d v);
 
+/* Matrix4 double-precision */
 geomlib_mat4d geomlib_mat4d_identity(void);
 geomlib_mat4d geomlib_mat4d_mul(geomlib_mat4d a, geomlib_mat4d b);
 int geomlib_mat4d_inverse(geomlib_mat4d m, geomlib_mat4d *out);
