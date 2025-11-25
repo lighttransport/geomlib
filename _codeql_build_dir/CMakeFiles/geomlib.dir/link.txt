@@ -1,2 +1,0 @@
-/usr/bin/ar qc libgeomlib.a CMakeFiles/geomlib.dir/src/geomlib_linalg.c.o CMakeFiles/geomlib.dir/src/geomlib_solver.c.o CMakeFiles/geomlib.dir/src/geomlib_mesh.c.o
-/usr/bin/ranlib libgeomlib.a

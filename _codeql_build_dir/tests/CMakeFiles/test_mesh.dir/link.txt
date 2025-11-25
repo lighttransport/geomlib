@@ -1,1 +1,0 @@
-/home/runner/work/geomlib/.codeql-scratch/dbs/cpp/working/autobuild/bin/c++  -fno-rtti -fno-exceptions -O3 -DNDEBUG -Wl,--dependency-file=CMakeFiles/test_mesh.dir/link.d CMakeFiles/test_mesh.dir/test_mesh.cpp.o -o test_mesh  ../libgeomlib.a -lm
