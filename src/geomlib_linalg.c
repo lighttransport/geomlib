@@ -643,6 +643,58 @@ geomlib_mat4 geomlib_mat4_ortho(float left, float right, float bottom, float top
 }
 
 /* ============================================================================
+ * Double-precision Vector2 Operations
+ * ============================================================================ */
+
+geomlib_vec2d geomlib_vec2d_create(double x, double y) {
+    geomlib_vec2d v;
+    v.x = x;
+    v.y = y;
+    return v;
+}
+
+geomlib_vec2d geomlib_vec2d_add(geomlib_vec2d va, geomlib_vec2d vb) {
+    geomlib_vec2d v;
+    v.x = va.x + vb.x;
+    v.y = va.y + vb.y;
+    return v;
+}
+
+geomlib_vec2d geomlib_vec2d_sub(geomlib_vec2d va, geomlib_vec2d vb) {
+    geomlib_vec2d v;
+    v.x = va.x - vb.x;
+    v.y = va.y - vb.y;
+    return v;
+}
+
+geomlib_vec2d geomlib_vec2d_mul(geomlib_vec2d v, double s) {
+    geomlib_vec2d result;
+    result.x = v.x * s;
+    result.y = v.y * s;
+    return result;
+}
+
+double geomlib_vec2d_dot(geomlib_vec2d va, geomlib_vec2d vb) {
+    return va.x * vb.x + va.y * vb.y;
+}
+
+double geomlib_vec2d_length(geomlib_vec2d v) {
+    return sqrt(v.x * v.x + v.y * v.y);
+}
+
+geomlib_vec2d geomlib_vec2d_normalize(geomlib_vec2d v) {
+    double len = geomlib_vec2d_length(v);
+    if (len > 0.0) {
+        geomlib_vec2d result;
+        double inv_len = 1.0 / len;
+        result.x = v.x * inv_len;
+        result.y = v.y * inv_len;
+        return result;
+    }
+    return v;
+}
+
+/* ============================================================================
  * Double-precision Vector3 Operations
  * ============================================================================ */
 
