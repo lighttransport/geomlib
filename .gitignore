@@ -51,3 +51,13 @@ _codeql_detected_source_root
 .vscode/
 *.swp
 *.swo
+
+# Node.js
+node_modules/
+*.lock
+
+# WebAssembly build artifacts
+web/build/
+web/demo/public/*.wasm
+web/demo/public/*.js
+!web/demo/public/index.html

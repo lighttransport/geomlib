@@ -31,6 +31,13 @@ set(GEOMLIB_SOURCES
     src/geomlib_linalg.c
     src/geomlib_solver.c
     src/geomlib_mesh.c
+    src/geomlib_random.c
+    src/geomlib_montecarlo.c
+    src/geomlib_bvh.c
+    src/geomlib_collision.c
+    src/geomlib_surface.c
+    src/geomlib_healing.c
+    src/geomlib_remeshing.c
 )
 
 # Create library

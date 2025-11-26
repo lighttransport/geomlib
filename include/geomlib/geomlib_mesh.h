@@ -202,6 +202,7 @@ geomlib_vec3 geomlib_aabb_center(geomlib_aabb box);
 geomlib_vec3 geomlib_aabb_size(geomlib_aabb box);
 float geomlib_aabb_surface_area(geomlib_aabb box);
 float geomlib_aabb_volume(geomlib_aabb box);
+geomlib_vec3 geomlib_aabb_closest_point(const geomlib_aabb *box, geomlib_vec3 point);
 
 /* ============================================================================
  * Primitive Generation

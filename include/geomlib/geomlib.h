@@ -29,5 +29,12 @@
 #include "geomlib_linalg.h"
 #include "geomlib_solver.h"
 #include "geomlib_mesh.h"
+#include "geomlib_random.h"
+#include "geomlib_montecarlo.h"
+#include "geomlib_bvh.h"
+#include "geomlib_collision.h"
+#include "geomlib_surface.h"
+#include "geomlib_healing.h"
+#include "geomlib_remeshing.h"
 
 #endif /* GEOMLIB_H */
