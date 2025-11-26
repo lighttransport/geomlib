@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Geomlib WebAssembly Demo</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="container">
+    <div id="canvas-container"></div>
+
+    <div id="controls">
+      <h2>Geomlib Demo</h2>
+
+      <div class="section">
+        <h3>Mesh Generation</h3>
+        <button id="btn-sphere">Create Sphere</button>
+        <button id="btn-box">Create Box</button>
+        <button id="btn-cylinder">Create Cylinder</button>
+        <button id="btn-plane">Create Plane</button>
+      </div>
+
+      <div class="section">
+        <h3>Point Cloud & Surface</h3>
+        <button id="btn-random-cloud">Random Point Cloud</button>
+        <button id="btn-gaussian-splats">Generate Gaussian Splats</button>
+        <div style="margin-top: 12px; margin-bottom: 12px;">
+          <label for="file-input" style="display: block; margin-bottom: 6px; font-size: 13px;">
+            Load File (PLY/SPZ):
+          </label>
+          <input type="file" id="file-input" accept=".ply,.spz,.splat" style="width: 100%; font-size: 12px;">
+        </div>
+        <button id="btn-reconstruct-greedy">Reconstruct (Greedy)</button>
+        <button id="btn-reconstruct-marching">Reconstruct (Marching)</button>
+        <button id="btn-reconstruct-auto">Reconstruct (Auto)</button>
+      </div>
+
+      <div class="section">
+        <h3>Collision Proxy</h3>
+        <button id="btn-convex">Convex Hull</button>
+        <button id="btn-simplified">Simplified (50 tri)</button>
+        <button id="btn-obb">OBB Box</button>
+        <button id="btn-aabb">AABB Box</button>
+      </div>
+
+      <div class="section">
+        <h3>Mesh Operations</h3>
+        <button id="btn-simplify">Simplify 50%</button>
+        <button id="btn-bvh">Build BVH</button>
+        <button id="btn-ray">Cast Random Rays</button>
+      </div>
+
+      <div class="section">
+        <h3>Mesh Healing</h3>
+        <button id="btn-analyze">Analyze Topology</button>
+        <button id="btn-fix-orientation">Fix Orientation</button>
+        <button id="btn-remove-degenerates">Remove Degenerates</button>
+        <button id="btn-remove-duplicates">Remove Duplicates</button>
+        <button id="btn-repair-mesh">Repair Mesh</button>
+      </div>
+
+      <div class="section">
+        <h3>Remeshing</h3>
+        <button id="btn-remesh-uniform">Uniform Remesh</button>
+        <button id="btn-remesh-adaptive">Adaptive Remesh</button>
+        <button id="btn-remesh-custom">Custom Remesh</button>
+        <div style="margin-top: 10px;">
+          <label style="display: block; margin-bottom: 5px; font-size: 12px;">
+            Target Edge Length: <span id="remesh-length-value">0.1</span>
+          </label>
+          <input type="range" id="remesh-length-slider" min="0.01" max="0.5" step="0.01" value="0.1" style="width: 100%;">
+        </div>
+      </div>
+
+      <div class="section">
+        <h3>Display</h3>
+        <label>
+          <input type="checkbox" id="chk-wireframe" checked>
+          Wireframe
+        </label>
+        <label>
+          <input type="checkbox" id="chk-proxy">
+          Show Proxy
+        </label>
+        <label>
+          <input type="checkbox" id="chk-bvh">
+          Show BVH
+        </label>
+        <label>
+          <input type="checkbox" id="chk-points">
+          Show Points
+        </label>
+        <div id="bvh-depth-control" style="display: none; margin-top: 10px;">
+          <label style="display: block; margin-bottom: 5px;">
+            BVH Depth: <span id="bvh-depth-value">3</span>
+          </label>
+          <input type="range" id="bvh-depth-slider" min="0" max="10" value="3" style="width: 100%;">
+        </div>
+      </div>
+
+      <div id="stats" class="section">
+        <h3>Statistics</h3>
+        <div id="mesh-stats"></div>
+        <div id="pointcloud-stats"></div>
+        <div id="bvh-stats"></div>
+        <div id="healing-stats"></div>
+        <div id="remeshing-stats"></div>
+      </div>
+
+      <div id="info" class="section">
+        <p><strong>Controls:</strong></p>
+        <ul>
+          <li>Left click + drag: Rotate</li>
+          <li>Right click + drag: Pan</li>
+          <li>Scroll: Zoom</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div id="loading">
+    <div class="loader"></div>
+    <p>Loading Geomlib WebAssembly...</p>
+  </div>
+
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

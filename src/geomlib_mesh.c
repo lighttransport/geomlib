@@ -882,6 +882,14 @@ float geomlib_aabb_volume(geomlib_aabb box) {
     return size.x * size.y * size.z;
 }
 
+geomlib_vec3 geomlib_aabb_closest_point(const geomlib_aabb *box, geomlib_vec3 point) {
+    geomlib_vec3 result;
+    result.x = (point.x < box->min.x) ? box->min.x : ((point.x > box->max.x) ? box->max.x : point.x);
+    result.y = (point.y < box->min.y) ? box->min.y : ((point.y > box->max.y) ? box->max.y : point.y);
+    result.z = (point.z < box->min.z) ? box->min.z : ((point.z > box->max.z) ? box->max.z : point.z);
+    return result;
+}
+
 /* ============================================================================
  * Primitive Generation
  * ============================================================================ */
