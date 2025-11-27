@@ -43,5 +43,6 @@
 #include "geomlib_smoothing.h"
 #include "geomlib_quality.h"
 #include "geomlib_subdivision.h"
+#include "geomlib_atlas.h"
 
 #endif /* GEOMLIB_H */

@@ -823,6 +823,106 @@ val checkMeshQuality(const Mesh& mesh) {
 }
 
 // ============================================================================
+// Texture Atlas Generation
+// ============================================================================
+
+val generateTextureAtlas(Mesh& mesh) {
+    geomlib_atlas_params params = geomlib_atlas_params_default();
+    geomlib_atlas atlas = geomlib_atlas_create(256);
+
+    int result = geomlib_generate_atlas(&mesh.mesh, &params, &atlas);
+
+    val output = val::object();
+
+    if (result == GEOMLIB_MESH_SUCCESS) {
+        output.set("success", true);
+        output.set("chartCount", (unsigned int)atlas.chart_count);
+        output.set("coverage", atlas.coverage);
+        output.set("avgStretch", atlas.avg_stretch);
+        output.set("maxStretch", atlas.max_stretch);
+
+        // Return chart info
+        val charts = val::array();
+        for (size_t c = 0; c < atlas.chart_count; c++) {
+            val chart = val::object();
+            chart.set("triangleCount", (unsigned int)atlas.charts[c].triangle_count);
+            chart.set("vertexCount", (unsigned int)atlas.charts[c].vertex_count);
+
+            val offset = val::object();
+            offset.set("x", atlas.charts[c].atlas_offset.x);
+            offset.set("y", atlas.charts[c].atlas_offset.y);
+            chart.set("offset", offset);
+
+            val bounds = val::object();
+            bounds.set("minX", atlas.charts[c].uv_min.x);
+            bounds.set("minY", atlas.charts[c].uv_min.y);
+            bounds.set("maxX", atlas.charts[c].uv_max.x);
+            bounds.set("maxY", atlas.charts[c].uv_max.y);
+            chart.set("bounds", bounds);
+
+            charts.call<void>("push", chart);
+        }
+        output.set("charts", charts);
+
+        // Return UVs array
+        if (mesh.mesh.texcoords) {
+            val uvs = val::array();
+            for (size_t i = 0; i < mesh.mesh.vertex_count; i++) {
+                uvs.call<void>("push", mesh.mesh.texcoords[i].x);
+                uvs.call<void>("push", mesh.mesh.texcoords[i].y);
+            }
+            output.set("uvs", uvs);
+        }
+    } else {
+        output.set("success", false);
+    }
+
+    geomlib_atlas_free(&atlas);
+    return output;
+}
+
+val generateTextureAtlasCustom(
+    Mesh& mesh,
+    int segmentation,
+    int packing,
+    int parameterization,
+    float gutterWidth
+) {
+    geomlib_atlas_params params = geomlib_atlas_params_default();
+    params.segmentation = (geomlib_atlas_segmentation)segmentation;
+    params.packing = (geomlib_atlas_packing)packing;
+    params.parameterization = (geomlib_param_method)parameterization;
+    params.gutter_width = gutterWidth;
+
+    geomlib_atlas atlas = geomlib_atlas_create(256);
+
+    int result = geomlib_generate_atlas(&mesh.mesh, &params, &atlas);
+
+    val output = val::object();
+
+    if (result == GEOMLIB_MESH_SUCCESS) {
+        output.set("success", true);
+        output.set("chartCount", (unsigned int)atlas.chart_count);
+        output.set("coverage", atlas.coverage);
+
+        // Return UVs array
+        if (mesh.mesh.texcoords) {
+            val uvs = val::array();
+            for (size_t i = 0; i < mesh.mesh.vertex_count; i++) {
+                uvs.call<void>("push", mesh.mesh.texcoords[i].x);
+                uvs.call<void>("push", mesh.mesh.texcoords[i].y);
+            }
+            output.set("uvs", uvs);
+        }
+    } else {
+        output.set("success", false);
+    }
+
+    geomlib_atlas_free(&atlas);
+    return output;
+}
+
+// ============================================================================
 // Subdivision Surfaces
 // ============================================================================
 
@@ -968,6 +1068,10 @@ EMSCRIPTEN_BINDINGS(geomlib) {
     // Mesh Quality
     function("computeMeshQuality", &computeMeshQuality);
     function("checkMeshQuality", &checkMeshQuality);
+
+    // Texture Atlas
+    function("generateTextureAtlas", &generateTextureAtlas);
+    function("generateTextureAtlasCustom", &generateTextureAtlasCustom);
 
     // Subdivision
     function("subdivideLoop", &subdivideLoop, allow_raw_pointers());
