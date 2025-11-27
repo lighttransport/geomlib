@@ -557,6 +557,214 @@ val parameterizeLSCM(const Mesh& mesh, int boundaryShape) {
 }
 
 // ============================================================================
+// Curvature Computation
+// ============================================================================
+
+val computeCurvature(const Mesh& mesh) {
+    geomlib_mesh_curvature curvature = geomlib_curvature_create(mesh.mesh.vertex_count);
+
+    int result = geomlib_compute_curvature(&mesh.mesh, &curvature);
+
+    val output = val::object();
+    if (result == GEOMLIB_MESH_SUCCESS) {
+        val meanCurvatures = val::array();
+        val gaussianCurvatures = val::array();
+        val principalMax = val::array();
+        val principalMin = val::array();
+
+        for (size_t i = 0; i < curvature.vertex_count; i++) {
+            meanCurvatures.call<void>("push", curvature.curvatures[i].mean);
+            gaussianCurvatures.call<void>("push", curvature.curvatures[i].gaussian);
+            principalMax.call<void>("push", curvature.curvatures[i].principal_max);
+            principalMin.call<void>("push", curvature.curvatures[i].principal_min);
+        }
+
+        output.set("mean", meanCurvatures);
+        output.set("gaussian", gaussianCurvatures);
+        output.set("principalMax", principalMax);
+        output.set("principalMin", principalMin);
+        output.set("success", true);
+    } else {
+        output.set("success", false);
+    }
+
+    geomlib_curvature_free(&curvature);
+    return output;
+}
+
+val computeMeanCurvature(const Mesh& mesh) {
+    float *mean_curvatures = (float*)malloc(mesh.mesh.vertex_count * sizeof(float));
+
+    int result = geomlib_compute_mean_curvature(&mesh.mesh, mean_curvatures);
+
+    val output = val::object();
+    if (result == GEOMLIB_MESH_SUCCESS) {
+        val curvatures = val::array();
+        for (size_t i = 0; i < mesh.mesh.vertex_count; i++) {
+            curvatures.call<void>("push", mean_curvatures[i]);
+        }
+        output.set("curvatures", curvatures);
+        output.set("success", true);
+    } else {
+        output.set("success", false);
+    }
+
+    free(mean_curvatures);
+    return output;
+}
+
+val computeGaussianCurvature(const Mesh& mesh) {
+    float *gaussian_curvatures = (float*)malloc(mesh.mesh.vertex_count * sizeof(float));
+
+    int result = geomlib_compute_gaussian_curvature(&mesh.mesh, gaussian_curvatures);
+
+    val output = val::object();
+    if (result == GEOMLIB_MESH_SUCCESS) {
+        val curvatures = val::array();
+        for (size_t i = 0; i < mesh.mesh.vertex_count; i++) {
+            curvatures.call<void>("push", gaussian_curvatures[i]);
+        }
+        output.set("curvatures", curvatures);
+        output.set("success", true);
+    } else {
+        output.set("success", false);
+    }
+
+    free(gaussian_curvatures);
+    return output;
+}
+
+// ============================================================================
+// Geodesic Distances
+// ============================================================================
+
+val computeGeodesicDistances(const Mesh& mesh, uint32_t source_vertex) {
+    geomlib_geodesic_distances geo = geomlib_geodesic_create(mesh.mesh.vertex_count);
+
+    int result = geomlib_compute_geodesic_from_vertex(&mesh.mesh, source_vertex, &geo);
+
+    val output = val::object();
+    if (result == GEOMLIB_MESH_SUCCESS) {
+        val distances = val::array();
+        for (size_t i = 0; i < geo.vertex_count; i++) {
+            distances.call<void>("push", geo.distances[i]);
+        }
+        output.set("distances", distances);
+        output.set("success", true);
+    } else {
+        output.set("success", false);
+    }
+
+    geomlib_geodesic_free(&geo);
+    return output;
+}
+
+val computeGeodesicDistancesMultiple(const Mesh& mesh, val source_vertices_js) {
+    // Convert JavaScript array to C array
+    unsigned int length = source_vertices_js["length"].as<unsigned int>();
+    uint32_t *source_vertices = (uint32_t*)malloc(length * sizeof(uint32_t));
+
+    for (unsigned int i = 0; i < length; i++) {
+        source_vertices[i] = source_vertices_js[i].as<uint32_t>();
+    }
+
+    geomlib_geodesic_distances geo = geomlib_geodesic_create(mesh.mesh.vertex_count);
+
+    int result = geomlib_compute_geodesic_heat(&mesh.mesh, source_vertices, length, 0.0f, &geo);
+
+    val output = val::object();
+    if (result == GEOMLIB_MESH_SUCCESS) {
+        val distances = val::array();
+        for (size_t i = 0; i < geo.vertex_count; i++) {
+            distances.call<void>("push", geo.distances[i]);
+        }
+        output.set("distances", distances);
+        output.set("success", true);
+    } else {
+        output.set("success", false);
+    }
+
+    free(source_vertices);
+    geomlib_geodesic_free(&geo);
+    return output;
+}
+
+// ============================================================================
+// Mesh Decimation
+// ============================================================================
+
+val decimateQEM(Mesh& mesh, float target_ratio) {
+    geomlib_decimation_stats stats;
+    geomlib_decimation_params params = geomlib_decimation_params_default(1.0f - target_ratio);
+
+    int result = geomlib_decimate_qem(&mesh.mesh, &params, &stats);
+
+    val output = val::object();
+    if (result == GEOMLIB_MESH_SUCCESS) {
+        output.set("originalVertices", (unsigned int)stats.original_vertices);
+        output.set("originalTriangles", (unsigned int)stats.original_triangles);
+        output.set("finalVertices", (unsigned int)stats.final_vertices);
+        output.set("finalTriangles", (unsigned int)stats.final_triangles);
+        output.set("edgesCollapsed", (unsigned int)stats.edges_collapsed);
+        output.set("reductionRatio", stats.reduction_ratio);
+        output.set("maxError", stats.max_error);
+        output.set("meanError", stats.mean_error);
+        output.set("success", true);
+    } else {
+        output.set("success", false);
+    }
+
+    return output;
+}
+
+val decimateToVertexCount(Mesh& mesh, uint32_t target_vertices) {
+    geomlib_decimation_stats stats;
+    geomlib_decimation_params params = geomlib_decimation_params_default(0.0f);
+    params.target_vertex_count = target_vertices;
+
+    int result = geomlib_decimate_qem(&mesh.mesh, &params, &stats);
+
+    val output = val::object();
+    if (result == GEOMLIB_MESH_SUCCESS) {
+        output.set("originalVertices", (unsigned int)stats.original_vertices);
+        output.set("finalVertices", (unsigned int)stats.final_vertices);
+        output.set("success", true);
+    } else {
+        output.set("success", false);
+    }
+
+    return output;
+}
+
+// ============================================================================
+// Mesh Smoothing
+// ============================================================================
+
+val smoothLaplacian(Mesh& mesh, float lambda, int iterations) {
+    int result = geomlib_smooth_laplacian(&mesh.mesh, lambda, iterations);
+
+    val output = val::object();
+    output.set("success", result == GEOMLIB_MESH_SUCCESS);
+    return output;
+}
+
+val smoothTaubin(Mesh& mesh, float lambda, float mu, int iterations) {
+    int result = geomlib_smooth_taubin(&mesh.mesh, lambda, mu, iterations);
+
+    val output = val::object();
+    output.set("success", result == GEOMLIB_MESH_SUCCESS);
+    return output;
+}
+
+val smoothNormals(Mesh& mesh, int iterations) {
+    int result = geomlib_smooth_normals(&mesh.mesh, iterations);
+
+    val output = val::object();
+    output.set("success", result == GEOMLIB_MESH_SUCCESS);
+    return output;
+}
+
+// ============================================================================
 // Embind Bindings
 // ============================================================================
 
@@ -644,4 +852,22 @@ EMSCRIPTEN_BINDINGS(geomlib) {
     // Parameterization
     function("parameterizeHarmonic", &parameterizeHarmonic);
     function("parameterizeLSCM", &parameterizeLSCM);
+
+    // Curvature
+    function("computeCurvature", &computeCurvature);
+    function("computeMeanCurvature", &computeMeanCurvature);
+    function("computeGaussianCurvature", &computeGaussianCurvature);
+
+    // Geodesic Distances
+    function("computeGeodesicDistances", &computeGeodesicDistances);
+    function("computeGeodesicDistancesMultiple", &computeGeodesicDistancesMultiple);
+
+    // Decimation
+    function("decimateQEM", &decimateQEM);
+    function("decimateToVertexCount", &decimateToVertexCount);
+
+    // Smoothing
+    function("smoothLaplacian", &smoothLaplacian);
+    function("smoothTaubin", &smoothTaubin);
+    function("smoothNormals", &smoothNormals);
 }

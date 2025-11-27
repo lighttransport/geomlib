@@ -39,6 +39,10 @@ set(GEOMLIB_SOURCES
     src/geomlib_healing.c
     src/geomlib_remeshing.c
     src/geomlib_parameterization.c
+    src/geomlib_curvature.c
+    src/geomlib_geodesic.c
+    src/geomlib_decimation.c
+    src/geomlib_smoothing.c
 )
 
 # Create library
