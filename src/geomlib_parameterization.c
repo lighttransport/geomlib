@@ -241,6 +241,55 @@ int geomlib_parameterize_harmonic(
     return GEOMLIB_MESH_SUCCESS;
 }
 
+/* Helper: Compute LSCM conformal weights for a triangle */
+static void geomlib_compute_lscm_weights(
+    geomlib_vec3 p0, geomlib_vec3 p1, geomlib_vec3 p2,
+    float *w0, float *w1, float *w2
+) {
+    /* Compute edges */
+    geomlib_vec3 e0 = geomlib_vec3_sub(p1, p0);
+    geomlib_vec3 e1 = geomlib_vec3_sub(p2, p0);
+    geomlib_vec3 e2 = geomlib_vec3_sub(p2, p1);
+
+    /* Compute triangle area */
+    geomlib_vec3 n = geomlib_vec3_cross(e0, e1);
+    float area = geomlib_vec3_length(n) * 0.5f;
+
+    if (area < 1e-10f) {
+        *w0 = *w1 = *w2 = 0.0f;
+        return;
+    }
+
+    /* Compute cotangent weights (used in conformal parameterization) */
+    float len_e0 = geomlib_vec3_length(e0);
+    float len_e1 = geomlib_vec3_length(e1);
+    float len_e2 = geomlib_vec3_length(e2);
+
+    if (len_e0 < 1e-10f || len_e1 < 1e-10f || len_e2 < 1e-10f) {
+        *w0 = *w1 = *w2 = 0.0f;
+        return;
+    }
+
+    /* Angles using law of cosines */
+    float cos_alpha = geomlib_vec3_dot(e0, e1) / (len_e0 * len_e1);
+    float cos_beta = geomlib_vec3_dot(geomlib_vec3_negate(e0), e2) / (len_e0 * len_e2);
+    float cos_gamma = geomlib_vec3_dot(geomlib_vec3_negate(e1), geomlib_vec3_negate(e2)) / (len_e1 * len_e2);
+
+    /* Clamp to prevent numerical issues */
+    cos_alpha = fmaxf(-1.0f, fminf(1.0f, cos_alpha));
+    cos_beta = fmaxf(-1.0f, fminf(1.0f, cos_beta));
+    cos_gamma = fmaxf(-1.0f, fminf(1.0f, cos_gamma));
+
+    float sin_alpha = sqrtf(1.0f - cos_alpha * cos_alpha);
+    float sin_beta = sqrtf(1.0f - cos_beta * cos_beta);
+    float sin_gamma = sqrtf(1.0f - cos_gamma * cos_gamma);
+
+    /* Cotangent weights for conformal mapping */
+    *w0 = (sin_beta > 1e-6f) ? (cos_beta / sin_beta) : 0.0f;
+    *w1 = (sin_gamma > 1e-6f) ? (cos_gamma / sin_gamma) : 0.0f;
+    *w2 = (sin_alpha > 1e-6f) ? (cos_alpha / sin_alpha) : 0.0f;
+}
+
 /* LSCM parameterization (Lévy et al. 2002) */
 int geomlib_parameterize_lscm(
     const geomlib_trimesh *mesh,
@@ -249,9 +298,132 @@ int geomlib_parameterize_lscm(
 ) {
     if (!mesh || !uvs) return GEOMLIB_MESH_ERROR_INVALID;
 
-    /* For now, use harmonic as a placeholder */
-    /* TODO: Implement full LSCM with conformal energy minimization */
-    return geomlib_parameterize_harmonic(mesh, boundary, uvs);
+    /* Find boundary */
+    uint32_t *boundary_verts = NULL;
+    size_t boundary_count = 0;
+    int result = geomlib_find_boundary_loop(mesh, &boundary_verts, &boundary_count);
+    if (result != GEOMLIB_MESH_SUCCESS || boundary_count == 0) {
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    /* Initialize UVs */
+    memset(uvs->uvs, 0, mesh->vertex_count * sizeof(geomlib_vec2));
+
+    /* Pin boundary */
+    if (boundary == GEOMLIB_BOUNDARY_CIRCLE) {
+        geomlib_pin_boundary_circle(boundary_verts, boundary_count, uvs->uvs);
+    } else {
+        geomlib_pin_boundary_square(boundary_verts, boundary_count, uvs->uvs);
+    }
+
+    /* Mark boundary vertices */
+    bool *is_boundary = calloc(mesh->vertex_count, sizeof(bool));
+    for (size_t i = 0; i < boundary_count; i++) {
+        is_boundary[boundary_verts[i]] = true;
+    }
+
+    /* Build half-edge structure */
+    geomlib_halfedge_mesh hemesh;
+    result = geomlib_halfedge_build(&hemesh, mesh);
+    if (result != GEOMLIB_MESH_SUCCESS) {
+        free(boundary_verts);
+        free(is_boundary);
+        return result;
+    }
+
+    /* LSCM iterative solver using conformal weights */
+    geomlib_vec2 *uvs_new = malloc(mesh->vertex_count * sizeof(geomlib_vec2));
+
+    const int max_iterations = 1000;
+    const float tolerance = 1e-6f;
+
+    for (int iter = 0; iter < max_iterations; iter++) {
+        float max_change = 0.0f;
+
+        /* Update each interior vertex using conformal Laplacian */
+        for (size_t v = 0; v < mesh->vertex_count; v++) {
+            if (is_boundary[v]) {
+                uvs_new[v] = uvs->uvs[v];
+                continue;
+            }
+
+            /* Compute weighted average using cotangent weights */
+            geomlib_vec2 weighted_sum = {0.0f, 0.0f};
+            float weight_sum = 0.0f;
+
+            /* Iterate over triangles incident to this vertex */
+            for (size_t t = 0; t < mesh->triangle_count; t++) {
+                uint32_t i0 = mesh->indices[t * 3 + 0];
+                uint32_t i1 = mesh->indices[t * 3 + 1];
+                uint32_t i2 = mesh->indices[t * 3 + 2];
+
+                /* Check if vertex v is in this triangle */
+                int vertex_pos = -1;
+                if (i0 == v) vertex_pos = 0;
+                else if (i1 == v) vertex_pos = 1;
+                else if (i2 == v) vertex_pos = 2;
+
+                if (vertex_pos < 0) continue;
+
+                /* Get triangle vertices */
+                geomlib_vec3 p0 = mesh->vertices[i0];
+                geomlib_vec3 p1 = mesh->vertices[i1];
+                geomlib_vec3 p2 = mesh->vertices[i2];
+
+                /* Compute conformal weights */
+                float w0, w1, w2;
+                geomlib_compute_lscm_weights(p0, p1, p2, &w0, &w1, &w2);
+
+                /* Add weighted contributions from neighbors */
+                if (vertex_pos == 0) {
+                    /* Vertex is p0, neighbors are p1 and p2 */
+                    weighted_sum.x += w1 * uvs->uvs[i1].x + w2 * uvs->uvs[i2].x;
+                    weighted_sum.y += w1 * uvs->uvs[i1].y + w2 * uvs->uvs[i2].y;
+                    weight_sum += w1 + w2;
+                } else if (vertex_pos == 1) {
+                    /* Vertex is p1, neighbors are p0 and p2 */
+                    weighted_sum.x += w2 * uvs->uvs[i0].x + w0 * uvs->uvs[i2].x;
+                    weighted_sum.y += w2 * uvs->uvs[i0].y + w0 * uvs->uvs[i2].y;
+                    weight_sum += w2 + w0;
+                } else {
+                    /* Vertex is p2, neighbors are p0 and p1 */
+                    weighted_sum.x += w0 * uvs->uvs[i0].x + w1 * uvs->uvs[i1].x;
+                    weighted_sum.y += w0 * uvs->uvs[i0].y + w1 * uvs->uvs[i1].y;
+                    weight_sum += w0 + w1;
+                }
+            }
+
+            /* Compute new position */
+            if (weight_sum > 1e-10f) {
+                uvs_new[v].x = weighted_sum.x / weight_sum;
+                uvs_new[v].y = weighted_sum.y / weight_sum;
+            } else {
+                uvs_new[v] = uvs->uvs[v];
+            }
+
+            /* Compute change */
+            float dx = uvs_new[v].x - uvs->uvs[v].x;
+            float dy = uvs_new[v].y - uvs->uvs[v].y;
+            float change = sqrtf(dx*dx + dy*dy);
+            if (change > max_change) max_change = change;
+        }
+
+        /* Copy new values */
+        memcpy(uvs->uvs, uvs_new, mesh->vertex_count * sizeof(geomlib_vec2));
+
+        /* Check convergence */
+        if (max_change < tolerance) {
+            break;
+        }
+    }
+
+    /* Cleanup */
+    free(uvs_new);
+    free(is_boundary);
+    free(boundary_verts);
+    geomlib_halfedge_free(&hemesh);
+
+    return GEOMLIB_MESH_SUCCESS;
 }
 
 /* Default parameters */
