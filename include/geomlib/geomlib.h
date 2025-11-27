@@ -45,5 +45,6 @@
 #include "geomlib_subdivision.h"
 #include "geomlib_atlas.h"
 #include "geomlib_tetramesh.h"
+#include "geomlib_cfd.h"
 
 #endif /* GEOMLIB_H */
