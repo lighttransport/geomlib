@@ -37,5 +37,9 @@
 #include "geomlib_healing.h"
 #include "geomlib_remeshing.h"
 #include "geomlib_parameterization.h"
+#include "geomlib_curvature.h"
+#include "geomlib_geodesic.h"
+#include "geomlib_decimation.h"
+#include "geomlib_smoothing.h"
 
 #endif /* GEOMLIB_H */
