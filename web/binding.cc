@@ -823,6 +823,42 @@ val checkMeshQuality(const Mesh& mesh) {
 }
 
 // ============================================================================
+// Subdivision Surfaces
+// ============================================================================
+
+Mesh* subdivideLoop(const Mesh& input, int levels) {
+    Mesh* output = new Mesh();
+
+    geomlib_subdivision_params params = geomlib_subdivision_params_default(
+        GEOMLIB_SUBDIV_LOOP, levels);
+
+    int result = geomlib_subdivide_mesh(&input.mesh, &params, &output->mesh);
+
+    if (result != GEOMLIB_MESH_SUCCESS) {
+        delete output;
+        return nullptr;
+    }
+
+    return output;
+}
+
+Mesh* subdivideMidpoint(const Mesh& input, int levels) {
+    Mesh* output = new Mesh();
+
+    geomlib_subdivision_params params = geomlib_subdivision_params_default(
+        GEOMLIB_SUBDIV_MIDPOINT, levels);
+
+    int result = geomlib_subdivide_mesh(&input.mesh, &params, &output->mesh);
+
+    if (result != GEOMLIB_MESH_SUCCESS) {
+        delete output;
+        return nullptr;
+    }
+
+    return output;
+}
+
+// ============================================================================
 // Embind Bindings
 // ============================================================================
 
@@ -932,4 +968,8 @@ EMSCRIPTEN_BINDINGS(geomlib) {
     // Mesh Quality
     function("computeMeshQuality", &computeMeshQuality);
     function("checkMeshQuality", &checkMeshQuality);
+
+    // Subdivision
+    function("subdivideLoop", &subdivideLoop, allow_raw_pointers());
+    function("subdivideMidpoint", &subdivideMidpoint, allow_raw_pointers());
 }

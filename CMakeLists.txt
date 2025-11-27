@@ -44,6 +44,7 @@ set(GEOMLIB_SOURCES
     src/geomlib_decimation.c
     src/geomlib_smoothing.c
     src/geomlib_quality.c
+    src/geomlib_subdivision.c
 )
 
 # Create library
