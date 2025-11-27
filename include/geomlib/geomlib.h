@@ -36,5 +36,6 @@
 #include "geomlib_surface.h"
 #include "geomlib_healing.h"
 #include "geomlib_remeshing.h"
+#include "geomlib_parameterization.h"
 
 #endif /* GEOMLIB_H */

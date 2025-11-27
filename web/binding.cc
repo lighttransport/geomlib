@@ -509,6 +509,53 @@ val getRemeshingStats(const Mesh& mesh) {
     return result;
 }
 
+// Parameterization functions
+val parameterizeHarmonic(const Mesh& mesh, int boundaryShape) {
+    geomlib_uv_coords uvs = geomlib_uv_coords_create(mesh.mesh.vertex_count, mesh.mesh.triangle_count);
+
+    geomlib_boundary_shape shape = (geomlib_boundary_shape)boundaryShape;
+    int result = geomlib_parameterize_harmonic(&mesh.mesh, shape, &uvs);
+
+    val output = val::object();
+    if (result == GEOMLIB_MESH_SUCCESS) {
+        val uvArray = val::array();
+        for (size_t i = 0; i < uvs.vertex_count; i++) {
+            uvArray.call<void>("push", uvs.uvs[i].x);
+            uvArray.call<void>("push", uvs.uvs[i].y);
+        }
+        output.set("uvs", uvArray);
+        output.set("success", true);
+    } else {
+        output.set("success", false);
+    }
+
+    geomlib_uv_coords_free(&uvs);
+    return output;
+}
+
+val parameterizeLSCM(const Mesh& mesh, int boundaryShape) {
+    geomlib_uv_coords uvs = geomlib_uv_coords_create(mesh.mesh.vertex_count, mesh.mesh.triangle_count);
+
+    geomlib_boundary_shape shape = (geomlib_boundary_shape)boundaryShape;
+    int result = geomlib_parameterize_lscm(&mesh.mesh, shape, &uvs);
+
+    val output = val::object();
+    if (result == GEOMLIB_MESH_SUCCESS) {
+        val uvArray = val::array();
+        for (size_t i = 0; i < uvs.vertex_count; i++) {
+            uvArray.call<void>("push", uvs.uvs[i].x);
+            uvArray.call<void>("push", uvs.uvs[i].y);
+        }
+        output.set("uvs", uvArray);
+        output.set("success", true);
+    } else {
+        output.set("success", false);
+    }
+
+    geomlib_uv_coords_free(&uvs);
+    return output;
+}
+
 // ============================================================================
 // Embind Bindings
 // ============================================================================
@@ -593,4 +640,8 @@ EMSCRIPTEN_BINDINGS(geomlib) {
     function("computeTargetEdgeLength", &computeTargetEdgeLength);
     function("computeMeanEdgeLength", &computeMeanEdgeLength);
     function("getRemeshingStats", &getRemeshingStats);
+
+    // Parameterization
+    function("parameterizeHarmonic", &parameterizeHarmonic);
+    function("parameterizeLSCM", &parameterizeLSCM);
 }
