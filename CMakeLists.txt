@@ -47,6 +47,7 @@ set(GEOMLIB_SOURCES
     src/geomlib_subdivision.c
     src/geomlib_atlas.c
     src/geomlib_tetramesh.c
+    src/geomlib_cfd.c
 )
 
 # Create library

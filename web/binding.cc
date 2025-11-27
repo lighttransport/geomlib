@@ -923,6 +923,146 @@ val generateTextureAtlasCustom(
 }
 
 // ============================================================================
+// CFD Utilities
+// ============================================================================
+
+// Forward declaration
+class TetraMesh;
+
+class ScalarField {
+public:
+    geomlib_scalar_field field;
+
+    ScalarField(int count) {
+        field = geomlib_scalar_field_create(count);
+    }
+
+    ~ScalarField() {
+        geomlib_scalar_field_free(&field);
+    }
+
+    ScalarField(const ScalarField&) = delete;
+    ScalarField& operator=(const ScalarField&) = delete;
+
+    void setValue(int index, float value) {
+        if (index >= 0 && (size_t)index < field.count) {
+            field.values[index] = value;
+        }
+    }
+
+    float getValue(int index) const {
+        if (index >= 0 && (size_t)index < field.count) {
+            return field.values[index];
+        }
+        return 0.0f;
+    }
+
+    val getValues() const {
+        val values = val::array();
+        for (size_t i = 0; i < field.count; i++) {
+            values.call<void>("push", field.values[i]);
+        }
+        return values;
+    }
+};
+
+class VectorField {
+public:
+    geomlib_vector_field field;
+
+    VectorField(int count) {
+        field = geomlib_vector_field_create(count);
+    }
+
+    ~VectorField() {
+        geomlib_vector_field_free(&field);
+    }
+
+    VectorField(const VectorField&) = delete;
+    VectorField& operator=(const VectorField&) = delete;
+
+    void setVector(int index, float x, float y, float z) {
+        if (index >= 0 && (size_t)index < field.count) {
+            field.values[index] = geomlib_vec3_create(x, y, z);
+        }
+    }
+
+    val getVectors() const {
+        val vectors = val::array();
+        for (size_t i = 0; i < field.count; i++) {
+            vectors.call<void>("push", field.values[i].x);
+            vectors.call<void>("push", field.values[i].y);
+            vectors.call<void>("push", field.values[i].z);
+        }
+        return vectors;
+    }
+};
+
+VectorField* computeGradient(const Mesh& mesh, const ScalarField& field, int method) {
+    VectorField* gradient = new VectorField(mesh.mesh.vertex_count);
+
+    int result = geomlib_compute_gradient_scalar(
+        &mesh.mesh,
+        &field.field,
+        (geomlib_gradient_method)method,
+        &gradient->field
+    );
+
+    if (result != GEOMLIB_MESH_SUCCESS) {
+        delete gradient;
+        return nullptr;
+    }
+
+    return gradient;
+}
+
+val traceStreamline(
+    const Mesh& mesh,
+    const VectorField& velocity,
+    float seedX, float seedY, float seedZ,
+    float stepSize, int maxSteps
+) {
+    geomlib_vec3 seed = geomlib_vec3_create(seedX, seedY, seedZ);
+
+    geomlib_streamline_params params;
+    params.method = GEOMLIB_INTEGRATE_RK4;
+    params.step_size = stepSize;
+    params.max_steps = maxSteps;
+    params.max_length = 1000.0f;
+    params.bounds = geomlib_trimesh_compute_aabb(&mesh.mesh);
+
+    geomlib_streamline streamline = geomlib_streamline_create(maxSteps);
+
+    int result = geomlib_trace_streamline(
+        &mesh.mesh,
+        &velocity.field,
+        seed,
+        &params,
+        &streamline
+    );
+
+    val output = val::object();
+
+    if (result == GEOMLIB_MESH_SUCCESS) {
+        output.set("success", true);
+        output.set("pointCount", (int)streamline.point_count);
+
+        val points = val::array();
+        for (size_t i = 0; i < streamline.point_count; i++) {
+            points.call<void>("push", streamline.points[i].x);
+            points.call<void>("push", streamline.points[i].y);
+            points.call<void>("push", streamline.points[i].z);
+        }
+        output.set("points", points);
+    } else {
+        output.set("success", false);
+    }
+
+    geomlib_streamline_free(&streamline);
+    return output;
+}
+
+// ============================================================================
 // Tetrahedral Mesh (CFD)
 // ============================================================================
 
@@ -970,6 +1110,25 @@ public:
         return tets;
     }
 };
+
+val computeCFDQuality(const TetraMesh& tetramesh) {
+    geomlib_cfd_quality_thresholds thresholds = geomlib_cfd_quality_thresholds_default();
+
+    size_t failed_count = 0;
+    bool all_valid = geomlib_check_cfd_mesh_quality(
+        &tetramesh.mesh,
+        &thresholds,
+        &failed_count
+    );
+
+    val output = val::object();
+    output.set("allValid", all_valid);
+    output.set("failedCount", (unsigned int)failed_count);
+    output.set("passRate", (float)(tetramesh.mesh.tetrahedron_count - failed_count) /
+        (float)tetramesh.mesh.tetrahedron_count * 100.0f);
+
+    return output;
+}
 
 TetraMesh* tetrahedralizePoints(val points_array) {
     // Convert JavaScript array to C array
@@ -1215,6 +1374,24 @@ EMSCRIPTEN_BINDINGS(geomlib) {
     // Texture Atlas
     function("generateTextureAtlas", &generateTextureAtlas);
     function("generateTextureAtlasCustom", &generateTextureAtlasCustom);
+
+    // CFD Utilities
+    class_<ScalarField>("ScalarField")
+        .constructor<int>()
+        .function("setValue", &ScalarField::setValue)
+        .function("getValue", &ScalarField::getValue)
+        .function("getValues", &ScalarField::getValues)
+        ;
+
+    class_<VectorField>("VectorField")
+        .constructor<int>()
+        .function("setVector", &VectorField::setVector)
+        .function("getVectors", &VectorField::getVectors)
+        ;
+
+    function("computeGradient", &computeGradient, allow_raw_pointers());
+    function("traceStreamline", &traceStreamline);
+    function("computeCFDQuality", &computeCFDQuality);
 
     // Tetrahedral Mesh (CFD)
     class_<TetraMesh>("TetraMesh")
