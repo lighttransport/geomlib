@@ -45,6 +45,7 @@ set(GEOMLIB_SOURCES
     src/geomlib_smoothing.c
     src/geomlib_quality.c
     src/geomlib_subdivision.c
+    src/geomlib_atlas.c
 )
 
 # Create library
