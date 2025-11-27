@@ -42,5 +42,6 @@
 #include "geomlib_decimation.h"
 #include "geomlib_smoothing.h"
 #include "geomlib_quality.h"
+#include "geomlib_subdivision.h"
 
 #endif /* GEOMLIB_H */
