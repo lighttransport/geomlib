@@ -765,6 +765,64 @@ val smoothNormals(Mesh& mesh, int iterations) {
 }
 
 // ============================================================================
+// Mesh Quality Analysis
+// ============================================================================
+
+val computeMeshQuality(const Mesh& mesh) {
+    geomlib_mesh_quality_stats stats;
+    geomlib_quality_thresholds thresholds = geomlib_quality_thresholds_default();
+
+    int result = geomlib_compute_mesh_quality(&mesh.mesh, &thresholds, &stats);
+
+    val output = val::object();
+    if (result == GEOMLIB_MESH_SUCCESS) {
+        output.set("minTriangleArea", stats.min_triangle_area);
+        output.set("maxTriangleArea", stats.max_triangle_area);
+        output.set("meanTriangleArea", stats.mean_triangle_area);
+
+        output.set("minAngle", stats.min_angle_global);
+        output.set("maxAngle", stats.max_angle_global);
+        output.set("meanMinAngle", stats.mean_min_angle);
+
+        output.set("minAspectRatio", stats.min_aspect_ratio);
+        output.set("maxAspectRatio", stats.max_aspect_ratio);
+        output.set("meanAspectRatio", stats.mean_aspect_ratio);
+
+        output.set("minShapeMeasure", stats.min_shape_measure);
+        output.set("meanShapeMeasure", stats.mean_shape_measure);
+
+        output.set("minEdgeLength", stats.min_edge_length);
+        output.set("maxEdgeLength", stats.max_edge_length);
+        output.set("meanEdgeLength", stats.mean_edge_length);
+
+        output.set("degenerateCount", (unsigned int)stats.degenerate_count);
+        output.set("sliverCount", (unsigned int)stats.sliver_count);
+        output.set("boundaryEdges", (unsigned int)stats.boundary_edges);
+
+        output.set("minValence", stats.min_valence);
+        output.set("maxValence", stats.max_valence);
+        output.set("meanValence", stats.mean_valence);
+        output.set("irregularVertices", (unsigned int)stats.irregular_vertices);
+
+        output.set("qualityScore", stats.quality_score);
+        output.set("success", true);
+    } else {
+        output.set("success", false);
+    }
+
+    return output;
+}
+
+val checkMeshQuality(const Mesh& mesh) {
+    geomlib_quality_thresholds thresholds = geomlib_quality_thresholds_default();
+    bool passed = geomlib_check_mesh_quality(&mesh.mesh, &thresholds);
+
+    val output = val::object();
+    output.set("passed", passed);
+    return output;
+}
+
+// ============================================================================
 // Embind Bindings
 // ============================================================================
 
@@ -870,4 +928,8 @@ EMSCRIPTEN_BINDINGS(geomlib) {
     function("smoothLaplacian", &smoothLaplacian);
     function("smoothTaubin", &smoothTaubin);
     function("smoothNormals", &smoothNormals);
+
+    // Mesh Quality
+    function("computeMeshQuality", &computeMeshQuality);
+    function("checkMeshQuality", &checkMeshQuality);
 }

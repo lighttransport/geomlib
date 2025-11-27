@@ -41,5 +41,6 @@
 #include "geomlib_geodesic.h"
 #include "geomlib_decimation.h"
 #include "geomlib_smoothing.h"
+#include "geomlib_quality.h"
 
 #endif /* GEOMLIB_H */

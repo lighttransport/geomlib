@@ -31,6 +31,7 @@ set(GEOMLIB_SOURCES
     ../src/geomlib_geodesic.c
     ../src/geomlib_decimation.c
     ../src/geomlib_smoothing.c
+    ../src/geomlib_quality.c
 )
 
 # WebAssembly binding
