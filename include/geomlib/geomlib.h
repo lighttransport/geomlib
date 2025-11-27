@@ -46,5 +46,6 @@
 #include "geomlib_atlas.h"
 #include "geomlib_tetramesh.h"
 #include "geomlib_cfd.h"
+#include "geomlib_optimize.h"
 
 #endif /* GEOMLIB_H */

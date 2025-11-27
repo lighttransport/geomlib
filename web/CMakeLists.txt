@@ -36,6 +36,7 @@ set(GEOMLIB_SOURCES
     ../src/geomlib_atlas.c
     ../src/geomlib_tetramesh.c
     ../src/geomlib_cfd.c
+    ../src/geomlib_optimize.c
 )
 
 # WebAssembly binding

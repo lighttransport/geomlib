@@ -1261,6 +1261,70 @@ Mesh* subdivideMidpoint(const Mesh& input, int levels) {
 }
 
 // ============================================================================
+// Mesh Optimization
+// ============================================================================
+
+Mesh* optimizeVertexCache(Mesh* mesh) {
+    if (!mesh) return nullptr;
+
+    geomlib_optimize_vertex_cache(&mesh->mesh, GEOMLIB_VCACHE_FORSYTH, 16);
+    return mesh;
+}
+
+Mesh* weldVertices(Mesh* mesh, float tolerance) {
+    if (!mesh) return nullptr;
+
+    geomlib_weld_result weld = geomlib_weld_vertices(&mesh->mesh, tolerance);
+    geomlib_apply_weld_result(&mesh->mesh, &weld);
+    geomlib_weld_result_free(&weld);
+
+    return mesh;
+}
+
+Mesh* optimizeVertexFetch(Mesh* mesh) {
+    if (!mesh) return nullptr;
+
+    geomlib_optimize_vertex_fetch(&mesh->mesh);
+    return mesh;
+}
+
+val optimizeMeshComplete(Mesh* mesh) {
+    if (!mesh) {
+        return val::object();
+    }
+
+    geomlib_optimize_params params = geomlib_optimize_params_default();
+    geomlib_optimize_result result = geomlib_optimize_mesh(&mesh->mesh, &params);
+
+    val output = val::object();
+    output.set("verticesBefore", (int)result.vertices_before);
+    output.set("verticesAfter", (int)result.vertices_after);
+    output.set("acmrBefore", result.cache_before.acmr);
+    output.set("acmrAfter", result.cache_after.acmr);
+    output.set("improvement", (result.cache_before.acmr - result.cache_after.acmr) / result.cache_before.acmr * 100.0f);
+    output.set("optimizationTimeMs", result.optimization_time_ms);
+
+    return output;
+}
+
+val analyzeCacheEfficiency(const Mesh* mesh) {
+    if (!mesh) {
+        return val::object();
+    }
+
+    geomlib_cache_stats stats = geomlib_analyze_vertex_cache(&mesh->mesh, 16);
+
+    val output = val::object();
+    output.set("acmr", stats.acmr);
+    output.set("atvr", stats.atvr);
+    output.set("cacheMisses", (int)stats.cache_misses);
+    output.set("transformedVertices", (int)stats.transformed_vertices);
+    output.set("cacheSize", (int)stats.cache_size);
+
+    return output;
+}
+
+// ============================================================================
 // Embind Bindings
 // ============================================================================
 
@@ -1407,6 +1471,13 @@ EMSCRIPTEN_BINDINGS(geomlib) {
     function("tetrahedralizeFromSurface", &tetrahedralizeFromSurface, allow_raw_pointers());
     function("computeTetraMeshStats", &computeTetraMeshStats);
     function("extractBoundaryFromTetraMesh", &extractBoundaryFromTetraMesh, allow_raw_pointers());
+
+    // Mesh Optimization
+    function("optimizeVertexCache", select_overload<Mesh*(Mesh*)>(&optimizeVertexCache), allow_raw_pointers());
+    function("weldVertices", select_overload<Mesh*(Mesh*, float)>(&weldVertices), allow_raw_pointers());
+    function("optimizeVertexFetch", select_overload<Mesh*(Mesh*)>(&optimizeVertexFetch), allow_raw_pointers());
+    function("optimizeMeshComplete", select_overload<val(Mesh*)>(&optimizeMeshComplete), allow_raw_pointers());
+    function("analyzeCacheEfficiency", select_overload<val(const Mesh*)>(&analyzeCacheEfficiency), allow_raw_pointers());
 
     // Subdivision
     function("subdivideLoop", &subdivideLoop, allow_raw_pointers());
