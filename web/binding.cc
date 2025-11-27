@@ -923,6 +923,149 @@ val generateTextureAtlasCustom(
 }
 
 // ============================================================================
+// Tetrahedral Mesh (CFD)
+// ============================================================================
+
+class TetraMesh {
+public:
+    geomlib_tetramesh mesh;
+
+    TetraMesh() {
+        geomlib_tetramesh_init(&mesh, 64, 64);
+    }
+
+    ~TetraMesh() {
+        geomlib_tetramesh_free(&mesh);
+    }
+
+    TetraMesh(const TetraMesh&) = delete;
+    TetraMesh& operator=(const TetraMesh&) = delete;
+
+    int getVertexCount() const {
+        return mesh.vertex_count;
+    }
+
+    int getTetrahedronCount() const {
+        return mesh.tetrahedron_count;
+    }
+
+    val getVertices() const {
+        val vertices = val::array();
+        for (size_t i = 0; i < mesh.vertex_count; i++) {
+            vertices.call<void>("push", mesh.vertices[i].x);
+            vertices.call<void>("push", mesh.vertices[i].y);
+            vertices.call<void>("push", mesh.vertices[i].z);
+        }
+        return vertices;
+    }
+
+    val getTetrahedra() const {
+        val tets = val::array();
+        for (size_t i = 0; i < mesh.tetrahedron_count; i++) {
+            tets.call<void>("push", mesh.tetrahedra[i].vertices[0]);
+            tets.call<void>("push", mesh.tetrahedra[i].vertices[1]);
+            tets.call<void>("push", mesh.tetrahedra[i].vertices[2]);
+            tets.call<void>("push", mesh.tetrahedra[i].vertices[3]);
+        }
+        return tets;
+    }
+};
+
+TetraMesh* tetrahedralizePoints(val points_array) {
+    // Convert JavaScript array to C array
+    size_t count = points_array["length"].as<size_t>() / 3;
+    geomlib_vec3 *points = (geomlib_vec3*)malloc(count * sizeof(geomlib_vec3));
+
+    for (size_t i = 0; i < count; i++) {
+        points[i].x = points_array[i * 3 + 0].as<float>();
+        points[i].y = points_array[i * 3 + 1].as<float>();
+        points[i].z = points_array[i * 3 + 2].as<float>();
+    }
+
+    TetraMesh* tetramesh = new TetraMesh();
+    int result = geomlib_tetrahedralize_points(points, count, &tetramesh->mesh);
+
+    free(points);
+
+    if (result != GEOMLIB_MESH_SUCCESS) {
+        delete tetramesh;
+        return nullptr;
+    }
+
+    return tetramesh;
+}
+
+TetraMesh* tetrahedralizeBox(
+    float minX, float minY, float minZ,
+    float maxX, float maxY, float maxZ,
+    float elementSize
+) {
+    geomlib_vec3 min_corner = geomlib_vec3_create(minX, minY, minZ);
+    geomlib_vec3 max_corner = geomlib_vec3_create(maxX, maxY, maxZ);
+
+    geomlib_tetra_params params = geomlib_tetra_params_default(GEOMLIB_TETRA_DELAUNAY);
+    params.element_size = elementSize;
+
+    TetraMesh* tetramesh = new TetraMesh();
+    int result = geomlib_tetrahedralize_box(min_corner, max_corner, &params, &tetramesh->mesh);
+
+    if (result != GEOMLIB_MESH_SUCCESS) {
+        delete tetramesh;
+        return nullptr;
+    }
+
+    return tetramesh;
+}
+
+TetraMesh* tetrahedralizeFromSurface(const Mesh& surface, float elementSize) {
+    geomlib_tetra_params params = geomlib_tetra_params_default(GEOMLIB_TETRA_DELAUNAY);
+    params.element_size = elementSize;
+
+    TetraMesh* tetramesh = new TetraMesh();
+    int result = geomlib_tetrahedralize_surface(&surface.mesh, &params, &tetramesh->mesh);
+
+    if (result != GEOMLIB_MESH_SUCCESS) {
+        delete tetramesh;
+        return nullptr;
+    }
+
+    return tetramesh;
+}
+
+val computeTetraMeshStats(const TetraMesh& tetramesh) {
+    geomlib_tetramesh_stats stats;
+    geomlib_tetramesh_compute_stats(&tetramesh.mesh, &stats);
+
+    val output = val::object();
+    output.set("vertexCount", (unsigned int)stats.vertex_count);
+    output.set("tetrahedronCount", (unsigned int)stats.tetrahedron_count);
+    output.set("boundaryFaceCount", (unsigned int)stats.boundary_face_count);
+    output.set("totalVolume", stats.total_volume);
+    output.set("minVolume", stats.min_volume);
+    output.set("maxVolume", stats.max_volume);
+    output.set("avgVolume", stats.avg_volume);
+    output.set("minQuality", stats.min_quality);
+    output.set("avgQuality", stats.avg_quality);
+    output.set("worstAspectRatio", stats.worst_aspect_ratio);
+    output.set("sliverCount", (unsigned int)stats.sliver_count);
+    output.set("boundaryVertices", (unsigned int)stats.boundary_vertices);
+
+    return output;
+}
+
+Mesh* extractBoundaryFromTetraMesh(const TetraMesh& tetramesh) {
+    Mesh* boundary = new Mesh();
+    int result = geomlib_tetramesh_extract_boundary(&tetramesh.mesh, &boundary->mesh);
+
+    if (result != GEOMLIB_MESH_SUCCESS) {
+        delete boundary;
+        return nullptr;
+    }
+
+    return boundary;
+}
+
+// ============================================================================
 // Subdivision Surfaces
 // ============================================================================
 
@@ -1072,6 +1215,21 @@ EMSCRIPTEN_BINDINGS(geomlib) {
     // Texture Atlas
     function("generateTextureAtlas", &generateTextureAtlas);
     function("generateTextureAtlasCustom", &generateTextureAtlasCustom);
+
+    // Tetrahedral Mesh (CFD)
+    class_<TetraMesh>("TetraMesh")
+        .constructor<>()
+        .function("getVertexCount", &TetraMesh::getVertexCount)
+        .function("getTetrahedronCount", &TetraMesh::getTetrahedronCount)
+        .function("getVertices", &TetraMesh::getVertices)
+        .function("getTetrahedra", &TetraMesh::getTetrahedra)
+        ;
+
+    function("tetrahedralizePoints", &tetrahedralizePoints, allow_raw_pointers());
+    function("tetrahedralizeBox", &tetrahedralizeBox, allow_raw_pointers());
+    function("tetrahedralizeFromSurface", &tetrahedralizeFromSurface, allow_raw_pointers());
+    function("computeTetraMeshStats", &computeTetraMeshStats);
+    function("extractBoundaryFromTetraMesh", &extractBoundaryFromTetraMesh, allow_raw_pointers());
 
     // Subdivision
     function("subdivideLoop", &subdivideLoop, allow_raw_pointers());
