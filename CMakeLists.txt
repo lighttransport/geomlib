@@ -38,6 +38,7 @@ set(GEOMLIB_SOURCES
     src/geomlib_surface.c
     src/geomlib_healing.c
     src/geomlib_remeshing.c
+    src/geomlib_parameterization.c
 )
 
 # Create library
