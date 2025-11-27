@@ -47,5 +47,7 @@
 #include "geomlib_tetramesh.h"
 #include "geomlib_cfd.h"
 #include "geomlib_optimize.h"
+#include "geomlib_topology.h"
+#include "geomlib_statistics.h"
 
 #endif /* GEOMLIB_H */
