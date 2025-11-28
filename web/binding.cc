@@ -1627,6 +1627,76 @@ val detectSharpEdges(const Mesh* mesh, float angleThreshold) {
 }
 
 // ============================================================================
+// SDF (Signed Distance Field)
+// ============================================================================
+
+class SDF {
+public:
+    geomlib_sdf sdf;
+
+    SDF() {
+        memset(&sdf, 0, sizeof(geomlib_sdf));
+    }
+
+    ~SDF() {
+        geomlib_sdf_free(&sdf);
+    }
+
+    SDF(const SDF&) = delete;
+    SDF& operator=(const SDF&) = delete;
+
+    int getResolutionX() const { return sdf.resolution[0]; }
+    int getResolutionY() const { return sdf.resolution[1]; }
+    int getResolutionZ() const { return sdf.resolution[2]; }
+    float getVoxelSize() const { return sdf.voxel_size; }
+
+    float queryDistance(float x, float y, float z) const {
+        geomlib_vec3 point = geomlib_vec3_create(x, y, z);
+        return geomlib_sdf_query_distance(&sdf, point);
+    }
+
+    bool isInside(float x, float y, float z) const {
+        geomlib_vec3 point = geomlib_vec3_create(x, y, z);
+        return geomlib_sdf_is_inside(&sdf, point);
+    }
+
+    val getStats() const {
+        geomlib_sdf_stats stats = geomlib_compute_sdf_stats(&sdf);
+        val output = val::object();
+        output.set("minDistance", stats.min_distance);
+        output.set("maxDistance", stats.max_distance);
+        output.set("avgDistance", stats.avg_distance);
+        output.set("insideVoxels", (int)stats.inside_voxels);
+        output.set("outsideVoxels", (int)stats.outside_voxels);
+        output.set("surfaceVoxels", (int)stats.surface_voxels);
+        output.set("memoryBytes", (int)stats.memory_bytes);
+        return output;
+    }
+};
+
+SDF* generateSDF(const Mesh* mesh, float voxelSize) {
+    if (!mesh) {
+        return nullptr;
+    }
+
+    SDF* sdf = new SDF();
+    sdf->sdf = geomlib_mesh_to_sdf_voxel_size(&mesh->mesh, voxelSize);
+
+    return sdf;
+}
+
+SDF* generateSDFResolution(const Mesh* mesh, int resolution) {
+    if (!mesh) {
+        return nullptr;
+    }
+
+    SDF* sdf = new SDF();
+    sdf->sdf = geomlib_mesh_to_sdf_resolution(&mesh->mesh, resolution);
+
+    return sdf;
+}
+
+// ============================================================================
 // Mesh Statistics
 // ============================================================================
 
@@ -1859,6 +1929,21 @@ EMSCRIPTEN_BINDINGS(geomlib) {
     // Feature Detection
     function("detectFeatures", select_overload<val(const Mesh*, float)>(&detectFeatures), allow_raw_pointers());
     function("detectSharpEdges", select_overload<val(const Mesh*, float)>(&detectSharpEdges), allow_raw_pointers());
+
+    // SDF (Signed Distance Field)
+    class_<SDF>("SDF")
+        .constructor<>()
+        .function("getResolutionX", &SDF::getResolutionX)
+        .function("getResolutionY", &SDF::getResolutionY)
+        .function("getResolutionZ", &SDF::getResolutionZ)
+        .function("getVoxelSize", &SDF::getVoxelSize)
+        .function("queryDistance", &SDF::queryDistance)
+        .function("isInside", &SDF::isInside)
+        .function("getStats", &SDF::getStats)
+        ;
+
+    function("generateSDF", &generateSDF, allow_raw_pointers());
+    function("generateSDFResolution", &generateSDFResolution, allow_raw_pointers());
 
     // Subdivision
     function("subdivideLoop", &subdivideLoop, allow_raw_pointers());

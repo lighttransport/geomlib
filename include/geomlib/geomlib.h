@@ -51,5 +51,6 @@
 #include "geomlib_statistics.h"
 #include "geomlib_holefill.h"
 #include "geomlib_feature.h"
+#include "geomlib_sdf.h"
 
 #endif /* GEOMLIB_H */
