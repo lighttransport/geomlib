@@ -903,10 +903,115 @@ int geomlib_sdf_extract_surface(
  * ============================================================================ */
 
 int geomlib_sdf_smooth(geomlib_sdf *sdf, float sigma) {
-    /* TODO: Implement Gaussian smoothing */
-    (void)sdf;
-    (void)sigma;
-    return GEOMLIB_MESH_ERROR_INVALID;
+    if (!sdf || !sdf->values || sigma <= 0.0f) {
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    /* Allocate temporary buffer for smoothed values */
+    float *smoothed = (float*)malloc(sdf->total_voxels * sizeof(float));
+    if (!smoothed) {
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    /* Compute Gaussian kernel size (3-sigma rule) */
+    int kernel_radius = (int)ceilf(3.0f * sigma);
+
+    /* Precompute 1D Gaussian kernel */
+    int kernel_size = 2 * kernel_radius + 1;
+    float *kernel = (float*)malloc(kernel_size * sizeof(float));
+    float kernel_sum = 0.0f;
+
+    for (int i = 0; i < kernel_size; i++) {
+        int offset = i - kernel_radius;
+        kernel[i] = expf(-(offset * offset) / (2.0f * sigma * sigma));
+        kernel_sum += kernel[i];
+    }
+
+    /* Normalize kernel */
+    for (int i = 0; i < kernel_size; i++) {
+        kernel[i] /= kernel_sum;
+    }
+
+    /* Apply separable 3D Gaussian filter */
+    float *temp = (float*)malloc(sdf->total_voxels * sizeof(float));
+
+    /* 1. Smooth along X */
+    for (uint32_t z = 0; z < sdf->resolution[2]; z++) {
+        for (uint32_t y = 0; y < sdf->resolution[1]; y++) {
+            for (uint32_t x = 0; x < sdf->resolution[0]; x++) {
+                float sum = 0.0f;
+                float weight_sum = 0.0f;
+
+                for (int k = -kernel_radius; k <= kernel_radius; k++) {
+                    int nx = (int)x + k;
+                    if (nx >= 0 && nx < (int)sdf->resolution[0]) {
+                        size_t idx = geomlib_sdf_get_index(sdf, nx, y, z);
+                        float w = kernel[k + kernel_radius];
+                        sum += sdf->values[idx] * w;
+                        weight_sum += w;
+                    }
+                }
+
+                size_t idx = geomlib_sdf_get_index(sdf, x, y, z);
+                temp[idx] = sum / weight_sum;
+            }
+        }
+    }
+
+    /* 2. Smooth along Y */
+    for (uint32_t z = 0; z < sdf->resolution[2]; z++) {
+        for (uint32_t y = 0; y < sdf->resolution[1]; y++) {
+            for (uint32_t x = 0; x < sdf->resolution[0]; x++) {
+                float sum = 0.0f;
+                float weight_sum = 0.0f;
+
+                for (int k = -kernel_radius; k <= kernel_radius; k++) {
+                    int ny = (int)y + k;
+                    if (ny >= 0 && ny < (int)sdf->resolution[1]) {
+                        size_t idx = geomlib_sdf_get_index(sdf, x, ny, z);
+                        float w = kernel[k + kernel_radius];
+                        sum += temp[idx] * w;
+                        weight_sum += w;
+                    }
+                }
+
+                size_t idx = geomlib_sdf_get_index(sdf, x, y, z);
+                smoothed[idx] = sum / weight_sum;
+            }
+        }
+    }
+
+    /* 3. Smooth along Z */
+    for (uint32_t z = 0; z < sdf->resolution[2]; z++) {
+        for (uint32_t y = 0; y < sdf->resolution[1]; y++) {
+            for (uint32_t x = 0; x < sdf->resolution[0]; x++) {
+                float sum = 0.0f;
+                float weight_sum = 0.0f;
+
+                for (int k = -kernel_radius; k <= kernel_radius; k++) {
+                    int nz = (int)z + k;
+                    if (nz >= 0 && nz < (int)sdf->resolution[2]) {
+                        size_t idx = geomlib_sdf_get_index(sdf, x, y, nz);
+                        float w = kernel[k + kernel_radius];
+                        sum += smoothed[idx] * w;
+                        weight_sum += w;
+                    }
+                }
+
+                size_t idx = geomlib_sdf_get_index(sdf, x, y, z);
+                temp[idx] = sum / weight_sum;
+            }
+        }
+    }
+
+    /* Copy result back */
+    memcpy(sdf->values, temp, sdf->total_voxels * sizeof(float));
+
+    free(kernel);
+    free(temp);
+    free(smoothed);
+
+    return GEOMLIB_MESH_SUCCESS;
 }
 
 int geomlib_sdf_dilate(geomlib_sdf *sdf, float amount) {
@@ -930,12 +1035,48 @@ geomlib_sdf geomlib_sdf_blend(
     const geomlib_sdf *sdf2,
     float blend_factor
 ) {
-    /* TODO: Implement SDF blending */
     geomlib_sdf result;
     memset(&result, 0, sizeof(geomlib_sdf));
-    (void)sdf1;
-    (void)sdf2;
-    (void)blend_factor;
+
+    /* Validate inputs */
+    if (!sdf1 || !sdf2 || !sdf1->values || !sdf2->values) {
+        return result;
+    }
+
+    /* Check that SDFs have compatible dimensions */
+    if (sdf1->resolution[0] != sdf2->resolution[0] ||
+        sdf1->resolution[1] != sdf2->resolution[1] ||
+        sdf1->resolution[2] != sdf2->resolution[2] ||
+        fabsf(sdf1->voxel_size - sdf2->voxel_size) > 1e-6f) {
+        return result;  /* Incompatible SDFs */
+    }
+
+    /* Clamp blend factor to [0, 1] */
+    blend_factor = fmaxf(0.0f, fminf(1.0f, blend_factor));
+
+    /* Allocate result SDF */
+    result.resolution[0] = sdf1->resolution[0];
+    result.resolution[1] = sdf1->resolution[1];
+    result.resolution[2] = sdf1->resolution[2];
+    result.total_voxels = sdf1->total_voxels;
+    result.voxel_size = sdf1->voxel_size;
+    result.origin = sdf1->origin;
+    result.extent = sdf1->extent;
+    result.is_narrow_band = sdf1->is_narrow_band || sdf2->is_narrow_band;
+    result.narrow_band_width = fmaxf(sdf1->narrow_band_width, sdf2->narrow_band_width);
+
+    result.values = (float*)malloc(result.total_voxels * sizeof(float));
+    if (!result.values) {
+        memset(&result, 0, sizeof(geomlib_sdf));
+        return result;
+    }
+
+    /* Blend distance values: linear interpolation */
+    for (size_t i = 0; i < result.total_voxels; i++) {
+        result.values[i] = sdf1->values[i] * (1.0f - blend_factor) +
+                          sdf2->values[i] * blend_factor;
+    }
+
     return result;
 }
 
@@ -944,15 +1085,134 @@ geomlib_sdf geomlib_sdf_blend(
  * ============================================================================ */
 
 int geomlib_sdf_save(const geomlib_sdf *sdf, const char *filename) {
-    /* TODO: Implement binary save */
-    (void)sdf;
-    (void)filename;
-    return GEOMLIB_MESH_ERROR_INVALID;
+    if (!sdf || !filename || !sdf->values) {
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    FILE *fp = fopen(filename, "wb");
+    if (!fp) {
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    /* Write header (magic number and version) */
+    const char magic[4] = {'S', 'D', 'F', '1'};
+    if (fwrite(magic, 1, 4, fp) != 4) {
+        fclose(fp);
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    /* Write metadata */
+    if (fwrite(&sdf->resolution[0], sizeof(uint32_t), 3, fp) != 3) {
+        fclose(fp);
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    if (fwrite(&sdf->voxel_size, sizeof(float), 1, fp) != 1) {
+        fclose(fp);
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    if (fwrite(&sdf->origin, sizeof(geomlib_vec3), 1, fp) != 1) {
+        fclose(fp);
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    if (fwrite(&sdf->extent, sizeof(geomlib_vec3), 1, fp) != 1) {
+        fclose(fp);
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    uint32_t is_narrow_band = sdf->is_narrow_band ? 1 : 0;
+    if (fwrite(&is_narrow_band, sizeof(uint32_t), 1, fp) != 1) {
+        fclose(fp);
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    if (fwrite(&sdf->narrow_band_width, sizeof(float), 1, fp) != 1) {
+        fclose(fp);
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    /* Write distance values */
+    if (fwrite(sdf->values, sizeof(float), sdf->total_voxels, fp) != sdf->total_voxels) {
+        fclose(fp);
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    fclose(fp);
+    return GEOMLIB_MESH_SUCCESS;
 }
 
 int geomlib_sdf_load(geomlib_sdf *sdf, const char *filename) {
-    /* TODO: Implement binary load */
-    (void)sdf;
-    (void)filename;
-    return GEOMLIB_MESH_ERROR_INVALID;
+    if (!sdf || !filename) {
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    FILE *fp = fopen(filename, "rb");
+    if (!fp) {
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    /* Read and verify magic number */
+    char magic[4];
+    if (fread(magic, 1, 4, fp) != 4 ||
+        magic[0] != 'S' || magic[1] != 'D' || magic[2] != 'F' || magic[3] != '1') {
+        fclose(fp);
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    /* Read metadata */
+    if (fread(&sdf->resolution[0], sizeof(uint32_t), 3, fp) != 3) {
+        fclose(fp);
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    if (fread(&sdf->voxel_size, sizeof(float), 1, fp) != 1) {
+        fclose(fp);
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    if (fread(&sdf->origin, sizeof(geomlib_vec3), 1, fp) != 1) {
+        fclose(fp);
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    if (fread(&sdf->extent, sizeof(geomlib_vec3), 1, fp) != 1) {
+        fclose(fp);
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    uint32_t is_narrow_band;
+    if (fread(&is_narrow_band, sizeof(uint32_t), 1, fp) != 1) {
+        fclose(fp);
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+    sdf->is_narrow_band = (is_narrow_band != 0);
+
+    if (fread(&sdf->narrow_band_width, sizeof(float), 1, fp) != 1) {
+        fclose(fp);
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    /* Calculate total voxels */
+    sdf->total_voxels = (size_t)sdf->resolution[0] *
+                       (size_t)sdf->resolution[1] *
+                       (size_t)sdf->resolution[2];
+
+    /* Allocate and read distance values */
+    sdf->values = (float*)malloc(sdf->total_voxels * sizeof(float));
+    if (!sdf->values) {
+        fclose(fp);
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    if (fread(sdf->values, sizeof(float), sdf->total_voxels, fp) != sdf->total_voxels) {
+        free(sdf->values);
+        sdf->values = NULL;
+        fclose(fp);
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    fclose(fp);
+    return GEOMLIB_MESH_SUCCESS;
 }
