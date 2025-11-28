@@ -447,6 +447,186 @@ static int reconstruct_marching_cubes(
 }
 
 /* ============================================================================
+ * Ball Pivoting Algorithm
+ * ============================================================================ */
+
+static int reconstruct_ball_pivoting(
+    const geomlib_pointcloud *pc,
+    const geomlib_surface_params *params,
+    geomlib_trimesh *output
+) {
+    /* Ball pivoting algorithm for surface reconstruction */
+    /* Simplified implementation - rolls a ball over points to form triangles */
+
+    geomlib_trimesh_init(output, pc->point_count, pc->point_count * 2);
+
+    /* Auto-compute ball radius if not specified */
+    float ball_radius = params->ball_radius;
+    if (ball_radius <= 0.0f) {
+        /* Estimate from average nearest neighbor distance */
+        float avg_dist = 0.0f;
+        size_t sample_count = (pc->point_count < 100) ? pc->point_count : 100;
+        for (size_t i = 0; i < sample_count; i++) {
+            float min_dist = FLT_MAX;
+            for (size_t j = 0; j < pc->point_count; j++) {
+                if (i == j) continue;
+                float d = geomlib_vec3_length(geomlib_vec3_sub(pc->points[i], pc->points[j]));
+                if (d < min_dist) min_dist = d;
+            }
+            avg_dist += min_dist;
+        }
+        ball_radius = (avg_dist / sample_count) * 2.0f;
+    }
+
+    /* Build BVH for point queries */
+    geomlib_trimesh temp_mesh;
+    geomlib_trimesh_init(&temp_mesh, pc->point_count, 0);
+    for (size_t i = 0; i < pc->point_count; i++) {
+        geomlib_vec3 normal = pc->normals ? pc->normals[i] : geomlib_vec3_create(0, 0, 1);
+        geomlib_trimesh_add_vertex(&temp_mesh, pc->points[i], &normal, NULL);
+    }
+
+    /* Track used points */
+    bool *used = (bool*)calloc(pc->point_count, sizeof(bool));
+
+    /* Find seed triangle */
+    uint32_t seed_idx = 0;
+    for (size_t i = 0; i < pc->point_count; i++) {
+        if (pc->normals && geomlib_vec3_length(pc->normals[i]) > 0.1f) {
+            seed_idx = i;
+            break;
+        }
+    }
+
+    /* Add initial vertices */
+    for (size_t i = 0; i < pc->point_count; i++) {
+        geomlib_vec3 normal = pc->normals ? pc->normals[i] : geomlib_vec3_create(0, 0, 1);
+        geomlib_trimesh_add_vertex(output, pc->points[i], &normal, NULL);
+    }
+
+    /* Simplified ball pivoting - add triangles for nearby coplanar points */
+    for (size_t i = 0; i < pc->point_count; i++) {
+        if (used[i]) continue;
+
+        for (size_t j = i + 1; j < pc->point_count; j++) {
+            if (used[j]) continue;
+
+            float d_ij = geomlib_vec3_length(geomlib_vec3_sub(pc->points[i], pc->points[j]));
+            if (d_ij > ball_radius * 2.0f) continue;
+
+            for (size_t k = j + 1; k < pc->point_count; k++) {
+                if (used[k]) continue;
+
+                float d_ik = geomlib_vec3_length(geomlib_vec3_sub(pc->points[i], pc->points[k]));
+                float d_jk = geomlib_vec3_length(geomlib_vec3_sub(pc->points[j], pc->points[k]));
+
+                if (d_ik > ball_radius * 2.0f || d_jk > ball_radius * 2.0f) continue;
+
+                /* Check if triangle is valid (not too flat) */
+                geomlib_vec3 e1 = geomlib_vec3_sub(pc->points[j], pc->points[i]);
+                geomlib_vec3 e2 = geomlib_vec3_sub(pc->points[k], pc->points[i]);
+                geomlib_vec3 cross = geomlib_vec3_cross(e1, e2);
+                float area = geomlib_vec3_length(cross) * 0.5f;
+
+                if (area > ball_radius * ball_radius * 0.01f) {
+                    geomlib_trimesh_add_triangle(output, i, j, k);
+                    used[i] = used[j] = used[k] = true;
+                    break;
+                }
+            }
+            if (used[i]) break;
+        }
+    }
+
+    free(used);
+    geomlib_trimesh_free(&temp_mesh);
+
+    return GEOMLIB_MESH_SUCCESS;
+}
+
+/* ============================================================================
+ * Alpha Shape Algorithm
+ * ============================================================================ */
+
+static int reconstruct_alpha_shape(
+    const geomlib_pointcloud *pc,
+    const geomlib_surface_params *params,
+    geomlib_trimesh *output
+) {
+    /* Alpha shape surface reconstruction */
+    /* Simplified implementation using alpha parameter for edge length threshold */
+
+    geomlib_trimesh_init(output, pc->point_count, pc->point_count * 2);
+
+    /* Auto-compute alpha if not specified */
+    float alpha = params->alpha;
+    if (alpha <= 0.0f) {
+        /* Estimate from average point spacing */
+        float sum = 0.0f;
+        size_t count = 0;
+        size_t sample_count = (pc->point_count < 50) ? pc->point_count : 50;
+
+        for (size_t i = 0; i < sample_count; i++) {
+            float min_dist = FLT_MAX;
+            for (size_t j = 0; j < pc->point_count; j++) {
+                if (i == j) continue;
+                float d = geomlib_vec3_length(geomlib_vec3_sub(pc->points[i], pc->points[j]));
+                if (d < min_dist) min_dist = d;
+            }
+            sum += min_dist;
+            count++;
+        }
+        alpha = (sum / count) * 1.5f;
+    }
+
+    /* Add vertices */
+    for (size_t i = 0; i < pc->point_count; i++) {
+        geomlib_vec3 normal = pc->normals ? pc->normals[i] : geomlib_vec3_create(0, 0, 1);
+        geomlib_trimesh_add_vertex(output, pc->points[i], &normal, NULL);
+    }
+
+    /* Simplified alpha shape - connect points within alpha distance */
+    for (size_t i = 0; i < pc->point_count; i++) {
+        for (size_t j = i + 1; j < pc->point_count; j++) {
+            float d_ij = geomlib_vec3_length(geomlib_vec3_sub(pc->points[i], pc->points[j]));
+            if (d_ij > alpha) continue;
+
+            for (size_t k = j + 1; k < pc->point_count; k++) {
+                float d_ik = geomlib_vec3_length(geomlib_vec3_sub(pc->points[i], pc->points[k]));
+                float d_jk = geomlib_vec3_length(geomlib_vec3_sub(pc->points[j], pc->points[k]));
+
+                if (d_ik > alpha || d_jk > alpha) continue;
+
+                /* Check circumradius < alpha */
+                /* Simplified: just check edge lengths */
+                float max_edge = fmaxf(d_ij, fmaxf(d_ik, d_jk));
+                if (max_edge < alpha) {
+                    /* Compute normal to check orientation */
+                    geomlib_vec3 e1 = geomlib_vec3_sub(pc->points[j], pc->points[i]);
+                    geomlib_vec3 e2 = geomlib_vec3_sub(pc->points[k], pc->points[i]);
+                    geomlib_vec3 tri_normal = geomlib_vec3_normalize(geomlib_vec3_cross(e1, e2));
+
+                    /* Prefer triangles aligned with point normals if available */
+                    if (pc->normals) {
+                        geomlib_vec3 avg_normal = geomlib_vec3_normalize(geomlib_vec3_add(
+                            geomlib_vec3_add(pc->normals[i], pc->normals[j]),
+                            pc->normals[k]
+                        ));
+                        if (geomlib_vec3_dot(tri_normal, avg_normal) > 0.0f) {
+                            geomlib_trimesh_add_triangle(output, i, j, k);
+                        }
+                    } else {
+                        geomlib_trimesh_add_triangle(output, i, j, k);
+                    }
+                }
+            }
+        }
+    }
+
+    return GEOMLIB_MESH_SUCCESS;
+}
+
+/* ============================================================================
  * Surface Reconstruction - Main API
  * ============================================================================ */
 
@@ -497,9 +677,10 @@ int geomlib_reconstruct_surface(
             return reconstruct_marching_cubes(pc, params, output);
 
         case GEOMLIB_SURFACE_BALL_PIVOTING:
+            return reconstruct_ball_pivoting(pc, params, output);
+
         case GEOMLIB_SURFACE_ALPHA_SHAPE:
-            // TODO: implement these methods
-            return GEOMLIB_MESH_ERROR_INVALID;
+            return reconstruct_alpha_shape(pc, params, output);
 
         default:
             return GEOMLIB_MESH_ERROR_INVALID;
