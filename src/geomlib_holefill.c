@@ -659,6 +659,37 @@ int geomlib_fill_minimal_surface(
 }
 
 /* ============================================================================
+ * Natural Fill (Advancing Front + Smoothing)
+ * ============================================================================ */
+
+int geomlib_fill_natural(
+    geomlib_trimesh *mesh,
+    const geomlib_hole *hole,
+    const geomlib_fill_params *params
+) {
+    /* Use advancing front for initial triangulation */
+    geomlib_fill_params af_params = *params;
+    af_params.method = GEOMLIB_FILL_ADVANCING_FRONT;
+    af_params.fair_interior = 1;
+    af_params.smooth_iterations = (params->smooth_iterations > 0) ?
+                                   params->smooth_iterations : 10;
+
+    int result = geomlib_fill_advancing_front(mesh, hole, &af_params);
+    if (result != GEOMLIB_MESH_SUCCESS) {
+        return result;
+    }
+
+    /* Additional smoothing pass with tangent constraint */
+    /* This preserves the boundary shape while fairring the interior */
+    if (af_params.smooth_iterations > 0) {
+        geomlib_smooth_hole_interior(mesh, hole, hole->boundary_vertices,
+                                       hole->vertex_count, af_params.smooth_iterations);
+    }
+
+    return GEOMLIB_MESH_SUCCESS;
+}
+
+/* ============================================================================
  * Hole Filling Main Functions
  * ============================================================================ */
 
@@ -678,8 +709,7 @@ int geomlib_fill_hole(
             return geomlib_fill_minimal_surface(mesh, hole, params);
 
         case GEOMLIB_FILL_NATURAL:
-            /* TODO: Implement natural fill */
-            return geomlib_fill_minimal_surface(mesh, hole, params);
+            return geomlib_fill_natural(mesh, hole, params);
 
         default:
             return GEOMLIB_MESH_ERROR_INVALID;
