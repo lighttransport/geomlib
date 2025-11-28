@@ -569,15 +569,152 @@ geomlib_regions geomlib_segment_planar_regions(
         regions.triangle_labels[i] = UINT32_MAX;  /* Unlabeled */
     }
 
+    /* Build edge mesh for adjacency */
+    geomlib_edge_mesh edges = geomlib_build_edge_mesh(mesh);
+
+    /* Compute triangle normals */
+    geomlib_vec3 *triangle_normals = (geomlib_vec3*)malloc(mesh->triangle_count * sizeof(geomlib_vec3));
+    for (size_t i = 0; i < mesh->triangle_count; i++) {
+        geomlib_vec3 v0 = mesh->vertices[mesh->indices[i * 3 + 0]];
+        geomlib_vec3 v1 = mesh->vertices[mesh->indices[i * 3 + 1]];
+        geomlib_vec3 v2 = mesh->vertices[mesh->indices[i * 3 + 2]];
+        geomlib_vec3 e1 = geomlib_vec3_sub(v1, v0);
+        geomlib_vec3 e2 = geomlib_vec3_sub(v2, v0);
+        geomlib_vec3 cross = geomlib_vec3_cross(e1, e2);
+        triangle_normals[i] = geomlib_vec3_normalize(cross);
+    }
+
     /* Allocate temp regions */
     geomlib_planar_region *temp_regions = (geomlib_planar_region*)malloc(
         mesh->triangle_count * sizeof(geomlib_planar_region));
     size_t region_count = 0;
 
-    /* TODO: Implement proper region growing algorithm */
-    /* For now, just return empty regions */
+    /* Angle threshold in radians */
+    float angle_threshold_rad = angle_threshold_deg * (float)M_PI / 180.0f;
+    float cos_threshold = cosf(angle_threshold_rad);
 
-    regions.regions = temp_regions;
+    /* Queue for region growing */
+    uint32_t *queue = (uint32_t*)malloc(mesh->triangle_count * sizeof(uint32_t));
+
+    /* Region growing algorithm */
+    for (size_t seed = 0; seed < mesh->triangle_count; seed++) {
+        if (regions.triangle_labels[seed] != UINT32_MAX) {
+            continue;  /* Already assigned */
+        }
+
+        /* Start new region */
+        uint32_t region_id = (uint32_t)region_count;
+        size_t queue_head = 0;
+        size_t queue_tail = 0;
+
+        /* Temporary triangle list for this region */
+        uint32_t *region_triangles = (uint32_t*)malloc(mesh->triangle_count * sizeof(uint32_t));
+        size_t region_tri_count = 0;
+
+        /* Add seed to queue */
+        queue[queue_tail++] = (uint32_t)seed;
+        regions.triangle_labels[seed] = region_id;
+        region_triangles[region_tri_count++] = (uint32_t)seed;
+
+        geomlib_vec3 seed_normal = triangle_normals[seed];
+
+        /* Grow region */
+        while (queue_head < queue_tail) {
+            uint32_t current = queue[queue_head++];
+
+            /* Check all edges of current triangle */
+            for (int e = 0; e < 3; e++) {
+                uint32_t v0 = mesh->indices[current * 3 + e];
+                uint32_t v1 = mesh->indices[current * 3 + ((e + 1) % 3)];
+
+                /* Find edge */
+                for (size_t ei = 0; ei < edges.edge_count; ei++) {
+                    if ((edges.edges[ei].v0 == v0 && edges.edges[ei].v1 == v1) ||
+                        (edges.edges[ei].v0 == v1 && edges.edges[ei].v1 == v0)) {
+
+                        /* Get adjacent face */
+                        uint32_t neighbor = (edges.edges[ei].face0 == current) ?
+                            edges.edges[ei].face1 : edges.edges[ei].face0;
+
+                        if (neighbor == UINT32_MAX || regions.triangle_labels[neighbor] != UINT32_MAX) {
+                            continue;  /* Boundary edge or already assigned */
+                        }
+
+                        /* Check normal similarity */
+                        float dot = geomlib_vec3_dot(seed_normal, triangle_normals[neighbor]);
+                        if (dot >= cos_threshold) {
+                            /* Add to region */
+                            regions.triangle_labels[neighbor] = region_id;
+                            region_triangles[region_tri_count++] = neighbor;
+                            queue[queue_tail++] = neighbor;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        /* Store region */
+        temp_regions[region_count].triangles = (uint32_t*)realloc(region_triangles,
+            region_tri_count * sizeof(uint32_t));
+        temp_regions[region_count].triangle_count = region_tri_count;
+
+        /* Compute plane: use average normal and centroid */
+        geomlib_vec3 avg_normal = {0, 0, 0};
+        geomlib_vec3 centroid = {0, 0, 0};
+        float total_area = 0.0f;
+
+        for (size_t i = 0; i < region_tri_count; i++) {
+            uint32_t tri_idx = region_triangles[i];
+            geomlib_vec3 v0 = mesh->vertices[mesh->indices[tri_idx * 3 + 0]];
+            geomlib_vec3 v1 = mesh->vertices[mesh->indices[tri_idx * 3 + 1]];
+            geomlib_vec3 v2 = mesh->vertices[mesh->indices[tri_idx * 3 + 2]];
+
+            /* Compute triangle area */
+            geomlib_vec3 e1 = geomlib_vec3_sub(v1, v0);
+            geomlib_vec3 e2 = geomlib_vec3_sub(v2, v0);
+            geomlib_vec3 cross = geomlib_vec3_cross(e1, e2);
+            float area = geomlib_vec3_length(cross) * 0.5f;
+            total_area += area;
+
+            avg_normal = geomlib_vec3_add(avg_normal, geomlib_vec3_mul(triangle_normals[tri_idx], area));
+
+            geomlib_vec3 tri_center = geomlib_vec3_mul(geomlib_vec3_add(geomlib_vec3_add(v0, v1), v2), 1.0f / 3.0f);
+            centroid = geomlib_vec3_add(centroid, geomlib_vec3_mul(tri_center, area));
+        }
+
+        avg_normal = geomlib_vec3_normalize(avg_normal);
+        centroid = geomlib_vec3_mul(centroid, 1.0f / total_area);
+
+        temp_regions[region_count].plane_normal = avg_normal;
+        temp_regions[region_count].plane_origin = centroid;
+        temp_regions[region_count].area = total_area;
+
+        /* Compute planarity (measure of flatness) */
+        float max_distance = 0.0f;
+        for (size_t i = 0; i < region_tri_count; i++) {
+            uint32_t tri_idx = region_triangles[i];
+            for (int v = 0; v < 3; v++) {
+                geomlib_vec3 vert = mesh->vertices[mesh->indices[tri_idx * 3 + v]];
+                geomlib_vec3 diff = geomlib_vec3_sub(vert, centroid);
+                float dist = fabsf(geomlib_vec3_dot(diff, avg_normal));
+                if (dist > max_distance) {
+                    max_distance = dist;
+                }
+            }
+        }
+        temp_regions[region_count].planarity = 1.0f / (1.0f + max_distance);
+
+        region_count++;
+    }
+
+    /* Cleanup */
+    free(queue);
+    free(triangle_normals);
+    geomlib_edge_mesh_free(&edges);
+
+    regions.regions = (geomlib_planar_region*)realloc(temp_regions,
+        region_count * sizeof(geomlib_planar_region));
     regions.region_count = region_count;
 
     return regions;
