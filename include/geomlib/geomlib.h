@@ -50,5 +50,6 @@
 #include "geomlib_topology.h"
 #include "geomlib_statistics.h"
 #include "geomlib_holefill.h"
+#include "geomlib_feature.h"
 
 #endif /* GEOMLIB_H */

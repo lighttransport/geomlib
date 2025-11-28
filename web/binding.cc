@@ -1527,6 +1527,106 @@ Mesh* fillAllHoles(Mesh* mesh, const std::string& method) {
 }
 
 // ============================================================================
+// Feature Detection
+// ============================================================================
+
+val detectFeatures(const Mesh* mesh, float sharpAngleThreshold) {
+    if (!mesh) {
+        return val::object();
+    }
+
+    geomlib_feature_params params = geomlib_feature_params_default();
+    params.sharp_angle_threshold = sharpAngleThreshold;
+
+    geomlib_features features = geomlib_detect_features(&mesh->mesh, &params);
+
+    val output = val::object();
+    output.set("edgeCount", (int)features.edge_count);
+    output.set("vertexCount", (int)features.vertex_count);
+    output.set("curveCount", (int)features.curve_count);
+
+    // Feature edges
+    val edges = val::array();
+    for (size_t i = 0; i < features.edge_count; i++) {
+        val edge = val::object();
+        edge.set("v0", features.edges[i].v0);
+        edge.set("v1", features.edges[i].v1);
+        edge.set("type", (int)features.edges[i].type);
+        edge.set("sharpness", features.edges[i].sharpness);
+
+        std::string type_name;
+        switch (features.edges[i].type) {
+            case GEOMLIB_FEATURE_SHARP_EDGE: type_name = "sharp_edge"; break;
+            case GEOMLIB_FEATURE_RIDGE: type_name = "ridge"; break;
+            case GEOMLIB_FEATURE_VALLEY: type_name = "valley"; break;
+            case GEOMLIB_FEATURE_BOUNDARY: type_name = "boundary"; break;
+            case GEOMLIB_FEATURE_CORNER: type_name = "corner"; break;
+            default: type_name = "none"; break;
+        }
+        edge.set("typeName", type_name);
+
+        edges.set(i, edge);
+    }
+    output.set("edges", edges);
+
+    // Feature vertices (corners)
+    val vertices = val::array();
+    for (size_t i = 0; i < features.vertex_count; i++) {
+        val vertex = val::object();
+        vertex.set("index", features.vertices[i].vertex_index);
+        vertex.set("edgeCount", features.vertices[i].edge_count);
+        vertex.set("sharpness", features.vertices[i].sharpness);
+        vertices.set(i, vertex);
+    }
+    output.set("vertices", vertices);
+
+    // Statistics
+    geomlib_feature_stats stats = geomlib_compute_feature_stats(&features);
+    val statsObj = val::object();
+    statsObj.set("sharpEdgeCount", (int)stats.sharp_edge_count);
+    statsObj.set("ridgeCount", (int)stats.ridge_count);
+    statsObj.set("valleyCount", (int)stats.valley_count);
+    statsObj.set("cornerCount", (int)stats.corner_count);
+    statsObj.set("boundaryEdgeCount", (int)stats.boundary_edge_count);
+    statsObj.set("avgSharpness", stats.avg_sharpness);
+    statsObj.set("maxSharpness", stats.max_sharpness);
+    statsObj.set("minSharpness", stats.min_sharpness);
+    output.set("stats", statsObj);
+
+    geomlib_features_free(&features);
+
+    return output;
+}
+
+val detectSharpEdges(const Mesh* mesh, float angleThreshold) {
+    if (!mesh) {
+        return val::object();
+    }
+
+    size_t edge_count;
+    geomlib_feature_edge *edges = geomlib_detect_sharp_edges(
+        &mesh->mesh, angleThreshold, &edge_count);
+
+    val output = val::object();
+    output.set("edgeCount", (int)edge_count);
+
+    val edgesArray = val::array();
+    for (size_t i = 0; i < edge_count; i++) {
+        val edge = val::object();
+        edge.set("v0", edges[i].v0);
+        edge.set("v1", edges[i].v1);
+        edge.set("sharpness", edges[i].sharpness);
+
+        edgesArray.set(i, edge);
+    }
+    output.set("edges", edgesArray);
+
+    free(edges);
+
+    return output;
+}
+
+// ============================================================================
 // Mesh Statistics
 // ============================================================================
 
@@ -1755,6 +1855,10 @@ EMSCRIPTEN_BINDINGS(geomlib) {
     // Hole Filling
     function("detectHoles", select_overload<val(const Mesh*)>(&detectHoles), allow_raw_pointers());
     function("fillAllHoles", select_overload<Mesh*(Mesh*, const std::string&)>(&fillAllHoles), allow_raw_pointers());
+
+    // Feature Detection
+    function("detectFeatures", select_overload<val(const Mesh*, float)>(&detectFeatures), allow_raw_pointers());
+    function("detectSharpEdges", select_overload<val(const Mesh*, float)>(&detectSharpEdges), allow_raw_pointers());
 
     // Subdivision
     function("subdivideLoop", &subdivideLoop, allow_raw_pointers());
