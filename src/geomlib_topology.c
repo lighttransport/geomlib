@@ -3,6 +3,7 @@
  */
 
 #include "geomlib/geomlib_topology.h"
+#include "geomlib/geomlib_bvh.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -741,7 +742,7 @@ static bool triangles_intersect(
     aabb_b.max.z = fmaxf(aabb_b.max.z, fmaxf(b1.z, b2.z));
 
     /* Quick AABB overlap test */
-    if (!geomlib_aabb_intersects(&aabb_a, &aabb_b)) {
+    if (!geomlib_aabb_intersects(aabb_a, aabb_b)) {
         return false;
     }
 
