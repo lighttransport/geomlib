@@ -1325,6 +1325,194 @@ val analyzeCacheEfficiency(const Mesh* mesh) {
 }
 
 // ============================================================================
+// Topology Analysis
+// ============================================================================
+
+val analyzeTopology(const Mesh* mesh) {
+    if (!mesh) {
+        return val::object();
+    }
+
+    geomlib_euler_characteristic euler = geomlib_compute_euler_characteristic(&mesh->mesh);
+
+    val output = val::object();
+    output.set("vertices", euler.vertices);
+    output.set("edges", euler.edges);
+    output.set("faces", euler.faces);
+    output.set("chi", euler.chi);
+    output.set("genus", euler.genus);
+    output.set("boundaries", euler.boundaries);
+    output.set("components", euler.components);
+
+    return output;
+}
+
+val findConnectedComponents(const Mesh* mesh) {
+    if (!mesh) {
+        return val::object();
+    }
+
+    geomlib_component_info info = geomlib_find_connected_components(&mesh->mesh);
+
+    val output = val::object();
+    output.set("componentCount", (int)info.component_count);
+
+    val vertexLabels = val::array();
+    for (size_t i = 0; i < mesh->mesh.vertex_count; i++) {
+        vertexLabels.call<void>("push", (int)info.vertex_labels[i]);
+    }
+    output.set("vertexLabels", vertexLabels);
+
+    val componentSizes = val::array();
+    for (uint32_t i = 0; i < info.component_count; i++) {
+        val component = val::object();
+        component.set("vertices", (int)info.component_vertex_counts[i]);
+        component.set("faces", (int)info.component_face_counts[i]);
+        componentSizes.call<void>("push", component);
+    }
+    output.set("components", componentSizes);
+
+    geomlib_component_info_free(&info);
+
+    return output;
+}
+
+val extractBoundaryLoops(const Mesh* mesh) {
+    if (!mesh) {
+        return val::object();
+    }
+
+    geomlib_boundary_loops loops = geomlib_extract_boundary_loops(&mesh->mesh);
+
+    val output = val::object();
+    output.set("loopCount", (int)loops.loop_count);
+
+    val loopArray = val::array();
+    for (size_t i = 0; i < loops.loop_count; i++) {
+        val loop = val::object();
+        loop.set("vertexCount", (int)loops.loops[i].vertex_count);
+        loop.set("length", loops.loops[i].length);
+
+        val vertices = val::array();
+        for (size_t j = 0; j < loops.loops[i].vertex_count; j++) {
+            vertices.call<void>("push", (int)loops.loops[i].vertices[j]);
+        }
+        loop.set("vertices", vertices);
+
+        loopArray.call<void>("push", loop);
+    }
+    output.set("loops", loopArray);
+
+    geomlib_boundary_loops_free(&loops);
+
+    return output;
+}
+
+val analyzeManifold(const Mesh* mesh) {
+    if (!mesh) {
+        return val::object();
+    }
+
+    geomlib_manifold_analysis analysis = geomlib_analyze_manifold(&mesh->mesh);
+
+    val output = val::object();
+    output.set("isManifold", analysis.is_manifold);
+    output.set("isEdgeManifold", analysis.is_edge_manifold);
+    output.set("isVertexManifold", analysis.is_vertex_manifold);
+    output.set("isOriented", analysis.is_oriented);
+    output.set("isClosed", analysis.is_closed);
+    output.set("nonmanifoldCount", (int)analysis.nonmanifold_count);
+
+    geomlib_manifold_analysis_free(&analysis);
+
+    return output;
+}
+
+val computeValenceStats(const Mesh* mesh) {
+    if (!mesh) {
+        return val::object();
+    }
+
+    geomlib_valence_stats stats = geomlib_compute_valence_stats(&mesh->mesh);
+
+    val output = val::object();
+    output.set("minValence", (int)stats.min_valence);
+    output.set("maxValence", (int)stats.max_valence);
+    output.set("avgValence", stats.avg_valence);
+
+    val histogram = val::array();
+    for (size_t i = 0; i < stats.histogram_size; i++) {
+        histogram.call<void>("push", (int)stats.histogram[i]);
+    }
+    output.set("histogram", histogram);
+
+    geomlib_valence_stats_free(&stats);
+
+    return output;
+}
+
+// ============================================================================
+// Mesh Statistics
+// ============================================================================
+
+val computeMeshStatistics(const Mesh* mesh, int histogramBins) {
+    if (!mesh) {
+        return val::object();
+    }
+
+    geomlib_mesh_stats stats = geomlib_compute_mesh_stats(&mesh->mesh, histogramBins);
+
+    val output = val::object();
+    output.set("vertexCount", (int)stats.vertex_count);
+    output.set("triangleCount", (int)stats.triangle_count);
+    output.set("edgeCount", (int)stats.edge_count);
+    output.set("isClosed", stats.is_closed);
+    output.set("surfaceArea", stats.surface_area);
+    output.set("volume", stats.volume);
+
+    // Edge stats
+    val edges = val::object();
+    edges.set("min", stats.edges.min_length);
+    edges.set("max", stats.edges.max_length);
+    edges.set("avg", stats.edges.avg_length);
+    edges.set("median", stats.edges.median_length);
+    edges.set("stdDev", stats.edges.std_dev);
+    output.set("edges", edges);
+
+    // Angle stats
+    val angles = val::object();
+    angles.set("min", stats.angles.min_angle_deg);
+    angles.set("max", stats.angles.max_angle_deg);
+    angles.set("avg", stats.angles.avg_angle_deg);
+    angles.set("degenerateCount", (int)stats.angles.degenerate_count);
+    angles.set("poorQualityCount", (int)stats.angles.poor_quality_count);
+    output.set("angles", angles);
+
+    // Area stats
+    val areas = val::object();
+    areas.set("min", stats.areas.min_area);
+    areas.set("max", stats.areas.max_area);
+    areas.set("avg", stats.areas.avg_area);
+    areas.set("total", stats.areas.total_area);
+    areas.set("stdDev", stats.areas.std_dev);
+    output.set("areas", areas);
+
+    // Aspect ratio stats
+    val aspectRatios = val::object();
+    aspectRatios.set("min", stats.aspect_ratios.min_ratio);
+    aspectRatios.set("max", stats.aspect_ratios.max_ratio);
+    aspectRatios.set("avg", stats.aspect_ratios.avg_ratio);
+    aspectRatios.set("goodCount", (int)stats.aspect_ratios.good_count);
+    aspectRatios.set("acceptableCount", (int)stats.aspect_ratios.acceptable_count);
+    aspectRatios.set("poorCount", (int)stats.aspect_ratios.poor_count);
+    output.set("aspectRatios", aspectRatios);
+
+    geomlib_mesh_stats_free(&stats);
+
+    return output;
+}
+
+// ============================================================================
 // Embind Bindings
 // ============================================================================
 
@@ -1478,6 +1666,16 @@ EMSCRIPTEN_BINDINGS(geomlib) {
     function("optimizeVertexFetch", select_overload<Mesh*(Mesh*)>(&optimizeVertexFetch), allow_raw_pointers());
     function("optimizeMeshComplete", select_overload<val(Mesh*)>(&optimizeMeshComplete), allow_raw_pointers());
     function("analyzeCacheEfficiency", select_overload<val(const Mesh*)>(&analyzeCacheEfficiency), allow_raw_pointers());
+
+    // Topology Analysis
+    function("analyzeTopology", select_overload<val(const Mesh*)>(&analyzeTopology), allow_raw_pointers());
+    function("findConnectedComponents", select_overload<val(const Mesh*)>(&findConnectedComponents), allow_raw_pointers());
+    function("extractBoundaryLoops", select_overload<val(const Mesh*)>(&extractBoundaryLoops), allow_raw_pointers());
+    function("analyzeManifold", select_overload<val(const Mesh*)>(&analyzeManifold), allow_raw_pointers());
+    function("computeValenceStats", select_overload<val(const Mesh*)>(&computeValenceStats), allow_raw_pointers());
+
+    // Mesh Statistics
+    function("computeMeshStatistics", select_overload<val(const Mesh*, int)>(&computeMeshStatistics), allow_raw_pointers());
 
     // Subdivision
     function("subdivideLoop", &subdivideLoop, allow_raw_pointers());
