@@ -345,9 +345,147 @@ int geomlib_compute_curvature(
         /* Store Voronoi area */
         curvature->vertex_areas[v] = geomlib_compute_voronoi_area(mesh, v);
 
-        /* TODO: Compute principal directions (requires more complex eigenvector computation) */
-        curvature->curvatures[v].principal_dir_max = (geomlib_vec3){0.0f, 0.0f, 0.0f};
-        curvature->curvatures[v].principal_dir_min = (geomlib_vec3){0.0f, 0.0f, 0.0f};
+        /* Compute principal directions */
+        if (mesh->normals) {
+            geomlib_vec3 normal = mesh->normals[v];
+
+            /* Build tangent frame: find perpendicular vectors to normal */
+            geomlib_vec3 tangent1, tangent2;
+
+            /* Choose axis least aligned with normal */
+            geomlib_vec3 axis;
+            if (fabsf(normal.x) < fabsf(normal.y) && fabsf(normal.x) < fabsf(normal.z)) {
+                axis = (geomlib_vec3){1.0f, 0.0f, 0.0f};
+            } else if (fabsf(normal.y) < fabsf(normal.z)) {
+                axis = (geomlib_vec3){0.0f, 1.0f, 0.0f};
+            } else {
+                axis = (geomlib_vec3){0.0f, 0.0f, 1.0f};
+            }
+
+            /* First tangent: perpendicular to normal */
+            tangent1 = geomlib_vec3_normalize(geomlib_vec3_cross(normal, axis));
+
+            /* Second tangent: complete orthonormal frame */
+            tangent2 = geomlib_vec3_cross(normal, tangent1);
+
+            /* Build 2x2 curvature tensor in tangent frame */
+            float tensor[2][2] = {{0.0f, 0.0f}, {0.0f, 0.0f}};
+            float total_weight = 0.0f;
+
+            /* Accumulate from incident edges */
+            for (size_t t = 0; t < mesh->triangle_count; t++) {
+                uint32_t i0 = mesh->indices[t * 3 + 0];
+                uint32_t i1 = mesh->indices[t * 3 + 1];
+                uint32_t i2 = mesh->indices[t * 3 + 2];
+
+                /* Check if this triangle contains vertex v */
+                if (i0 != v && i1 != v && i2 != v) continue;
+
+                /* Get the other two vertices */
+                uint32_t v1, v2;
+                if (i0 == v) {
+                    v1 = i1;
+                    v2 = i2;
+                } else if (i1 == v) {
+                    v1 = i0;
+                    v2 = i2;
+                } else {
+                    v1 = i0;
+                    v2 = i1;
+                }
+
+                /* Edge vectors */
+                geomlib_vec3 e1 = geomlib_vec3_sub(mesh->vertices[v1], mesh->vertices[v]);
+                geomlib_vec3 e2 = geomlib_vec3_sub(mesh->vertices[v2], mesh->vertices[v]);
+
+                /* Project edges onto tangent plane */
+                geomlib_vec3 e1_proj = geomlib_vec3_sub(e1, geomlib_vec3_mul(normal, geomlib_vec3_dot(e1, normal)));
+                geomlib_vec3 e2_proj = geomlib_vec3_sub(e2, geomlib_vec3_mul(normal, geomlib_vec3_dot(e2, normal)));
+
+                /* Get coordinates in tangent frame */
+                float e1_t1 = geomlib_vec3_dot(e1_proj, tangent1);
+                float e1_t2 = geomlib_vec3_dot(e1_proj, tangent2);
+                float e2_t1 = geomlib_vec3_dot(e2_proj, tangent1);
+                float e2_t2 = geomlib_vec3_dot(e2_proj, tangent2);
+
+                /* Normal curvature in edge direction */
+                float len_e1 = geomlib_vec3_length(e1);
+                float len_e2 = geomlib_vec3_length(e2);
+
+                if (len_e1 > 1e-10f && len_e2 > 1e-10f) {
+                    /* Weight by edge length */
+                    float weight = len_e1 + len_e2;
+
+                    /* Accumulate to tensor (simplified) */
+                    tensor[0][0] += weight * e1_t1 * e1_t1;
+                    tensor[0][1] += weight * e1_t1 * e1_t2;
+                    tensor[1][0] += weight * e2_t1 * e2_t2;
+                    tensor[1][1] += weight * e2_t2 * e2_t2;
+
+                    total_weight += weight;
+                }
+            }
+
+            if (total_weight > 1e-10f) {
+                /* Normalize tensor */
+                tensor[0][0] /= total_weight;
+                tensor[0][1] /= total_weight;
+                tensor[1][0] /= total_weight;
+                tensor[1][1] /= total_weight;
+
+                /* Compute eigenvalues and eigenvectors of 2x2 symmetric matrix */
+                /* For symmetric 2x2: [[a, b], [b, c]] */
+                float a = tensor[0][0];
+                float b = (tensor[0][1] + tensor[1][0]) * 0.5f;  /* Symmetrize */
+                float c = tensor[1][1];
+
+                /* Eigenvalues: lambda = (a+c)/2 ± sqrt((a-c)^2/4 + b^2) */
+                float trace = a + c;
+                float det = a * c - b * b;
+                float disc = trace * trace * 0.25f - det;
+
+                if (disc >= 0.0f) {
+                    float sqrt_disc = sqrtf(disc);
+                    float lambda1 = trace * 0.5f + sqrt_disc;
+                    float lambda2 = trace * 0.5f - sqrt_disc;
+
+                    /* Eigenvector for lambda1: direction of maximum curvature */
+                    geomlib_vec3 dir_max;
+                    if (fabsf(b) > 1e-10f) {
+                        float v1_x = lambda1 - c;
+                        float v1_y = b;
+                        float len = sqrtf(v1_x * v1_x + v1_y * v1_y);
+                        v1_x /= len;
+                        v1_y /= len;
+                        dir_max = geomlib_vec3_add(
+                            geomlib_vec3_mul(tangent1, v1_x),
+                            geomlib_vec3_mul(tangent2, v1_y)
+                        );
+                    } else {
+                        /* Diagonal matrix - principal directions align with tangent frame */
+                        dir_max = (lambda1 > lambda2) ? tangent1 : tangent2;
+                    }
+
+                    /* Minimum direction is perpendicular in tangent plane */
+                    geomlib_vec3 dir_min = geomlib_vec3_cross(normal, dir_max);
+
+                    curvature->curvatures[v].principal_dir_max = geomlib_vec3_normalize(dir_max);
+                    curvature->curvatures[v].principal_dir_min = geomlib_vec3_normalize(dir_min);
+                } else {
+                    /* Fallback to tangent frame */
+                    curvature->curvatures[v].principal_dir_max = tangent1;
+                    curvature->curvatures[v].principal_dir_min = tangent2;
+                }
+            } else {
+                /* No incident triangles or degenerate - use tangent frame */
+                curvature->curvatures[v].principal_dir_max = tangent1;
+                curvature->curvatures[v].principal_dir_min = tangent2;
+            }
+        } else {
+            /* No normals available - cannot compute directions */
+            curvature->curvatures[v].principal_dir_max = (geomlib_vec3){0.0f, 0.0f, 0.0f};
+            curvature->curvatures[v].principal_dir_min = (geomlib_vec3){0.0f, 0.0f, 0.0f};
+        }
     }
 
     free(mean_curv);
