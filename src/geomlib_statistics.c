@@ -4,6 +4,7 @@
 
 #include "geomlib/geomlib_statistics.h"
 #include "geomlib/geomlib_topology.h"
+#include "geomlib/geomlib_montecarlo.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -528,15 +529,12 @@ geomlib_mesh_difference geomlib_compare_meshes(
             geomlib_vec3 t1 = mesh2->vertices[mesh2->indices[j * 3 + 1]];
             geomlib_vec3 t2 = mesh2->vertices[mesh2->indices[j * 3 + 2]];
 
-            /* Simple vertex-to-vertex distance for now */
-            /* TODO: Proper point-to-triangle distance */
-            float d0 = geomlib_vec3_length(geomlib_vec3_sub(v1, t0));
-            float d1 = geomlib_vec3_length(geomlib_vec3_sub(v1, t1));
-            float d2 = geomlib_vec3_length(geomlib_vec3_sub(v1, t2));
+            /* Compute proper point-to-triangle distance */
+            geomlib_vec3 closest = geomlib_closest_point_triangle(v1, t0, t1, t2);
+            float dist = geomlib_vec3_length(geomlib_vec3_sub(v1, closest));
 
-            float d_min = fminf(fminf(d0, d1), d2);
-            if (d_min < min_dist) {
-                min_dist = d_min;
+            if (dist < min_dist) {
+                min_dist = dist;
             }
         }
 
@@ -562,13 +560,12 @@ geomlib_mesh_difference geomlib_compare_meshes(
             geomlib_vec3 t1 = mesh1->vertices[mesh1->indices[j * 3 + 1]];
             geomlib_vec3 t2 = mesh1->vertices[mesh1->indices[j * 3 + 2]];
 
-            float d0 = geomlib_vec3_length(geomlib_vec3_sub(v2, t0));
-            float d1 = geomlib_vec3_length(geomlib_vec3_sub(v2, t1));
-            float d2 = geomlib_vec3_length(geomlib_vec3_sub(v2, t2));
+            /* Compute proper point-to-triangle distance */
+            geomlib_vec3 closest = geomlib_closest_point_triangle(v2, t0, t1, t2);
+            float dist = geomlib_vec3_length(geomlib_vec3_sub(v2, closest));
 
-            float d_min = fminf(fminf(d0, d1), d2);
-            if (d_min < min_dist) {
-                min_dist = d_min;
+            if (dist < min_dist) {
+                min_dist = dist;
             }
         }
 
