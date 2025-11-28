@@ -51,6 +51,7 @@ set(GEOMLIB_SOURCES
     src/geomlib_optimize.c
     src/geomlib_topology.c
     src/geomlib_statistics.c
+    src/geomlib_holefill.c
 )
 
 # Create library
