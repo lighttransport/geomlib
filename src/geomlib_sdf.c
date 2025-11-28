@@ -181,7 +181,15 @@ float geomlib_compute_unsigned_distance(
 ) {
     float min_dist = FLT_MAX;
 
-    /* Brute force for now (TODO: use BVH traversal) */
+    /* Use BVH acceleration if available */
+    if (bvh) {
+        geomlib_vec3 closest;
+        if (geomlib_bvh_closest_point(bvh, point, &closest, &min_dist, NULL)) {
+            return min_dist;
+        }
+    }
+
+    /* Fallback to brute force if no BVH or query failed */
     for (size_t i = 0; i < mesh->triangle_count; i++) {
         geomlib_vec3 v0 = mesh->vertices[mesh->indices[i * 3 + 0]];
         geomlib_vec3 v1 = mesh->vertices[mesh->indices[i * 3 + 1]];
