@@ -53,6 +53,7 @@ set(GEOMLIB_SOURCES
     src/geomlib_statistics.c
     src/geomlib_holefill.c
     src/geomlib_feature.c
+    src/geomlib_sdf.c
 )
 
 # Create library
