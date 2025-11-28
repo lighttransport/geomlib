@@ -1452,6 +1452,81 @@ val computeValenceStats(const Mesh* mesh) {
 }
 
 // ============================================================================
+// Hole Filling
+// ============================================================================
+
+val detectHoles(const Mesh* mesh) {
+    if (!mesh) {
+        return val::object();
+    }
+
+    geomlib_holes holes = geomlib_detect_holes(&mesh->mesh);
+
+    val output = val::object();
+    output.set("holeCount", (int)holes.hole_count);
+
+    val holesArray = val::array();
+    for (size_t i = 0; i < holes.hole_count; i++) {
+        val hole = val::object();
+        hole.set("vertexCount", (int)holes.holes[i].vertex_count);
+        hole.set("perimeter", holes.holes[i].perimeter);
+        hole.set("areaEstimate", holes.holes[i].area_estimate);
+        hole.set("isPlanar", holes.holes[i].is_planar);
+        hole.set("planarity", holes.holes[i].planarity);
+
+        val centroid = val::object();
+        centroid.set("x", holes.holes[i].centroid.x);
+        centroid.set("y", holes.holes[i].centroid.y);
+        centroid.set("z", holes.holes[i].centroid.z);
+        hole.set("centroid", centroid);
+
+        val normal = val::object();
+        normal.set("x", holes.holes[i].normal.x);
+        normal.set("y", holes.holes[i].normal.y);
+        normal.set("z", holes.holes[i].normal.z);
+        hole.set("normal", normal);
+
+        // Boundary vertices
+        val boundaryVertices = val::array();
+        for (size_t j = 0; j < holes.holes[i].vertex_count; j++) {
+            boundaryVertices.set(j, holes.holes[i].boundary_vertices[j]);
+        }
+        hole.set("boundaryVertices", boundaryVertices);
+
+        holesArray.set(i, hole);
+    }
+    output.set("holes", holesArray);
+
+    geomlib_holes_free(&holes);
+
+    return output;
+}
+
+Mesh* fillAllHoles(Mesh* mesh, const std::string& method) {
+    if (!mesh) {
+        return nullptr;
+    }
+
+    geomlib_fill_method fill_method = GEOMLIB_FILL_TANGENT_PLANE;
+    if (method == "advancing_front") {
+        fill_method = GEOMLIB_FILL_ADVANCING_FRONT;
+    } else if (method == "minimal_surface") {
+        fill_method = GEOMLIB_FILL_MINIMAL_SURFACE;
+    } else if (method == "natural") {
+        fill_method = GEOMLIB_FILL_NATURAL;
+    }
+
+    geomlib_fill_params params = geomlib_fill_params_default(fill_method);
+
+    int result = geomlib_fill_all_holes(&mesh->mesh, &params);
+    if (result != GEOMLIB_MESH_SUCCESS) {
+        return nullptr;
+    }
+
+    return mesh;
+}
+
+// ============================================================================
 // Mesh Statistics
 // ============================================================================
 
@@ -1676,6 +1751,10 @@ EMSCRIPTEN_BINDINGS(geomlib) {
 
     // Mesh Statistics
     function("computeMeshStatistics", select_overload<val(const Mesh*, int)>(&computeMeshStatistics), allow_raw_pointers());
+
+    // Hole Filling
+    function("detectHoles", select_overload<val(const Mesh*)>(&detectHoles), allow_raw_pointers());
+    function("fillAllHoles", select_overload<Mesh*(Mesh*, const std::string&)>(&fillAllHoles), allow_raw_pointers());
 
     // Subdivision
     function("subdivideLoop", &subdivideLoop, allow_raw_pointers());

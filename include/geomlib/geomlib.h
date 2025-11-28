@@ -49,5 +49,6 @@
 #include "geomlib_optimize.h"
 #include "geomlib_topology.h"
 #include "geomlib_statistics.h"
+#include "geomlib_holefill.h"
 
 #endif /* GEOMLIB_H */
