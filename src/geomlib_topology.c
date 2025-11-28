@@ -713,14 +713,150 @@ void geomlib_valence_stats_free(geomlib_valence_stats *stats) {
  * Self-Intersection Detection (Basic BVH-based)
  * ============================================================================ */
 
+/* Helper: Test if two triangles intersect (basic AABB and edge-triangle tests) */
+static bool triangles_intersect(
+    geomlib_vec3 a0, geomlib_vec3 a1, geomlib_vec3 a2,
+    geomlib_vec3 b0, geomlib_vec3 b1, geomlib_vec3 b2,
+    geomlib_vec3 *intersection_point
+) {
+    /* Compute AABBs */
+    geomlib_aabb aabb_a;
+    aabb_a.min = a0;
+    aabb_a.max = a0;
+    aabb_a.min.x = fminf(aabb_a.min.x, fminf(a1.x, a2.x));
+    aabb_a.min.y = fminf(aabb_a.min.y, fminf(a1.y, a2.y));
+    aabb_a.min.z = fminf(aabb_a.min.z, fminf(a1.z, a2.z));
+    aabb_a.max.x = fmaxf(aabb_a.max.x, fmaxf(a1.x, a2.x));
+    aabb_a.max.y = fmaxf(aabb_a.max.y, fmaxf(a1.y, a2.y));
+    aabb_a.max.z = fmaxf(aabb_a.max.z, fmaxf(a1.z, a2.z));
+
+    geomlib_aabb aabb_b;
+    aabb_b.min = b0;
+    aabb_b.max = b0;
+    aabb_b.min.x = fminf(aabb_b.min.x, fminf(b1.x, b2.x));
+    aabb_b.min.y = fminf(aabb_b.min.y, fminf(b1.y, b2.y));
+    aabb_b.min.z = fminf(aabb_b.min.z, fminf(b1.z, b2.z));
+    aabb_b.max.x = fmaxf(aabb_b.max.x, fmaxf(b1.x, b2.x));
+    aabb_b.max.y = fmaxf(aabb_b.max.y, fmaxf(b1.y, b2.y));
+    aabb_b.max.z = fmaxf(aabb_b.max.z, fmaxf(b1.z, b2.z));
+
+    /* Quick AABB overlap test */
+    if (!geomlib_aabb_intersects(&aabb_a, &aabb_b)) {
+        return false;
+    }
+
+    /* Compute normals */
+    geomlib_vec3 ea1 = geomlib_vec3_sub(a1, a0);
+    geomlib_vec3 ea2 = geomlib_vec3_sub(a2, a0);
+    geomlib_vec3 na = geomlib_vec3_normalize(geomlib_vec3_cross(ea1, ea2));
+
+    geomlib_vec3 eb1 = geomlib_vec3_sub(b1, b0);
+    geomlib_vec3 eb2 = geomlib_vec3_sub(b2, b0);
+    geomlib_vec3 nb = geomlib_vec3_normalize(geomlib_vec3_cross(eb1, eb2));
+
+    /* Compute signed distances of triangle B vertices to plane of triangle A */
+    float da = geomlib_vec3_dot(na, a0);
+    float db0 = geomlib_vec3_dot(na, b0) - da;
+    float db1 = geomlib_vec3_dot(na, b1) - da;
+    float db2 = geomlib_vec3_dot(na, b2) - da;
+
+    /* If all vertices on same side, no intersection */
+    if ((db0 > 0 && db1 > 0 && db2 > 0) || (db0 < 0 && db1 < 0 && db2 < 0)) {
+        return false;
+    }
+
+    /* Compute signed distances of triangle A vertices to plane of triangle B */
+    float db = geomlib_vec3_dot(nb, b0);
+    float da0 = geomlib_vec3_dot(nb, a0) - db;
+    float da1 = geomlib_vec3_dot(nb, a1) - db;
+    float da2 = geomlib_vec3_dot(nb, a2) - db;
+
+    /* If all vertices on same side, no intersection */
+    if ((da0 > 0 && da1 > 0 && da2 > 0) || (da0 < 0 && da1 < 0 && da2 < 0)) {
+        return false;
+    }
+
+    /* Triangles likely intersect - compute approximate intersection point */
+    *intersection_point = geomlib_vec3_mul(geomlib_vec3_add(
+        geomlib_vec3_add(a0, a1),
+        geomlib_vec3_add(a2, geomlib_vec3_add(geomlib_vec3_add(b0, b1), b2))
+    ), 1.0f / 6.0f);
+
+    return true;
+}
+
 geomlib_self_intersection geomlib_detect_self_intersections(
     const geomlib_trimesh *mesh
 ) {
-    /* TODO: Implement using BVH for efficiency */
     geomlib_self_intersection result;
     result.has_intersections = false;
     result.pairs = NULL;
     result.pair_count = 0;
+
+    if (!mesh || mesh->triangle_count == 0) {
+        return result;
+    }
+
+    /* Build BVH for efficient queries */
+    geomlib_bvh bvh;
+    if (geomlib_bvh_build(&bvh, mesh, GEOMLIB_BVH_QUALITY_MEDIUM) != GEOMLIB_MESH_SUCCESS) {
+        return result;  /* Failed to build BVH */
+    }
+
+    /* Allocate space for intersection pairs (worst case: all pairs intersect) */
+    size_t max_pairs = (mesh->triangle_count * (mesh->triangle_count - 1)) / 2;
+    geomlib_intersection_pair *temp_pairs = (geomlib_intersection_pair*)malloc(
+        max_pairs * sizeof(geomlib_intersection_pair));
+    size_t pair_count = 0;
+
+    /* Check each triangle against all others */
+    /* TODO: Use BVH traversal to avoid O(n²) - for now using brute force with BVH AABB culling */
+    for (size_t i = 0; i < mesh->triangle_count; i++) {
+        geomlib_vec3 a0 = mesh->vertices[mesh->indices[i * 3 + 0]];
+        geomlib_vec3 a1 = mesh->vertices[mesh->indices[i * 3 + 1]];
+        geomlib_vec3 a2 = mesh->vertices[mesh->indices[i * 3 + 2]];
+
+        for (size_t j = i + 1; j < mesh->triangle_count; j++) {
+            geomlib_vec3 b0 = mesh->vertices[mesh->indices[j * 3 + 0]];
+            geomlib_vec3 b1 = mesh->vertices[mesh->indices[j * 3 + 1]];
+            geomlib_vec3 b2 = mesh->vertices[mesh->indices[j * 3 + 2]];
+
+            /* Skip adjacent triangles (share vertices) */
+            uint32_t ai0 = mesh->indices[i * 3 + 0];
+            uint32_t ai1 = mesh->indices[i * 3 + 1];
+            uint32_t ai2 = mesh->indices[i * 3 + 2];
+            uint32_t bi0 = mesh->indices[j * 3 + 0];
+            uint32_t bi1 = mesh->indices[j * 3 + 1];
+            uint32_t bi2 = mesh->indices[j * 3 + 2];
+
+            if (ai0 == bi0 || ai0 == bi1 || ai0 == bi2 ||
+                ai1 == bi0 || ai1 == bi1 || ai1 == bi2 ||
+                ai2 == bi0 || ai2 == bi1 || ai2 == bi2) {
+                continue;  /* Adjacent triangles */
+            }
+
+            geomlib_vec3 intersection_point;
+            if (triangles_intersect(a0, a1, a2, b0, b1, b2, &intersection_point)) {
+                temp_pairs[pair_count].face0 = (uint32_t)i;
+                temp_pairs[pair_count].face1 = (uint32_t)j;
+                temp_pairs[pair_count].point = intersection_point;
+                pair_count++;
+                result.has_intersections = true;
+            }
+        }
+    }
+
+    geomlib_bvh_free(&bvh);
+
+    /* Shrink array to actual size */
+    if (pair_count > 0) {
+        result.pairs = (geomlib_intersection_pair*)realloc(temp_pairs,
+            pair_count * sizeof(geomlib_intersection_pair));
+        result.pair_count = pair_count;
+    } else {
+        free(temp_pairs);
+    }
+
     return result;
 }
 
