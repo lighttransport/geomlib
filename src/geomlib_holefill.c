@@ -420,14 +420,218 @@ int geomlib_fill_tangent_plane(
  * Advancing Front Triangulation
  * ============================================================================ */
 
+/* Helper: Find best vertex to form triangle with edge */
+static uint32_t find_best_front_vertex(
+    const geomlib_trimesh *mesh,
+    uint32_t v0, uint32_t v1,
+    const bool *is_boundary,
+    const bool *is_used,
+    size_t vertex_count,
+    geomlib_vec3 normal_hint,
+    float *best_quality
+) {
+    geomlib_vec3 p0 = mesh->vertices[v0];
+    geomlib_vec3 p1 = mesh->vertices[v1];
+    geomlib_vec3 edge = geomlib_vec3_sub(p1, p0);
+    float edge_len = geomlib_vec3_length(edge);
+
+    uint32_t best_v = UINT32_MAX;
+    *best_quality = -FLT_MAX;
+
+    for (uint32_t v = 0; v < vertex_count; v++) {
+        if (v == v0 || v == v1 || !is_boundary[v] || is_used[v]) {
+            continue;
+        }
+
+        geomlib_vec3 p2 = mesh->vertices[v];
+
+        /* Compute triangle quality metrics */
+        geomlib_vec3 e1 = geomlib_vec3_sub(p2, p0);
+        geomlib_vec3 e2 = geomlib_vec3_sub(p2, p1);
+
+        /* Check triangle normal orientation */
+        geomlib_vec3 tri_normal = geomlib_vec3_cross(edge, e1);
+        float dot = geomlib_vec3_dot(tri_normal, normal_hint);
+        if (dot < 0.0f) {
+            continue;  /* Wrong orientation */
+        }
+
+        /* Compute quality: prefer equilateral, penalize long edges */
+        float len1 = geomlib_vec3_length(e1);
+        float len2 = geomlib_vec3_length(e2);
+
+        /* Aspect ratio quality */
+        float min_len = fminf(edge_len, fminf(len1, len2));
+        float max_len = fmaxf(edge_len, fmaxf(len1, len2));
+        float aspect = (max_len > 1e-6f) ? (min_len / max_len) : 0.0f;
+
+        /* Angle quality (prefer ~60 degrees) */
+        float cos_angle = geomlib_vec3_dot(e1, e2) / (len1 * len2 + 1e-10f);
+        float angle_quality = 1.0f - fabsf(cos_angle + 0.5f);  /* -0.5 = cos(120deg) */
+
+        /* Combined quality */
+        float quality = aspect * 0.7f + angle_quality * 0.3f;
+
+        if (quality > *best_quality) {
+            *best_quality = quality;
+            best_v = v;
+        }
+    }
+
+    return best_v;
+}
+
 int geomlib_fill_advancing_front(
     geomlib_trimesh *mesh,
     const geomlib_hole *hole,
     const geomlib_fill_params *params
 ) {
-    /* For now, use tangent plane as fallback */
-    /* TODO: Implement proper advancing front */
-    return geomlib_fill_tangent_plane(mesh, hole, params);
+    if (hole->vertex_count < 3) {
+        return GEOMLIB_MESH_SUCCESS;
+    }
+
+    /* Build active front (list of boundary edges) */
+    size_t front_capacity = hole->vertex_count * 2;
+    uint32_t *front_v0 = (uint32_t*)malloc(front_capacity * sizeof(uint32_t));
+    uint32_t *front_v1 = (uint32_t*)malloc(front_capacity * sizeof(uint32_t));
+    bool *front_active = (bool*)calloc(front_capacity, sizeof(bool));
+
+    /* Initialize front with boundary edges */
+    size_t front_count = 0;
+    for (size_t i = 0; i < hole->vertex_count; i++) {
+        front_v0[front_count] = hole->boundary_vertices[i];
+        front_v1[front_count] = hole->boundary_vertices[(i + 1) % hole->vertex_count];
+        front_active[front_count] = true;
+        front_count++;
+    }
+
+    /* Track which boundary vertices are available */
+    bool *is_boundary = (bool*)calloc(mesh->vertex_count, sizeof(bool));
+    bool *is_used = (bool*)calloc(mesh->vertex_count, sizeof(bool));
+
+    for (size_t i = 0; i < hole->vertex_count; i++) {
+        is_boundary[hole->boundary_vertices[i]] = true;
+    }
+
+    /* Advancing front loop */
+    size_t max_iterations = hole->vertex_count * 3;
+    size_t iteration = 0;
+
+    while (front_count > 0 && iteration < max_iterations) {
+        iteration++;
+
+        /* Find best active edge to process */
+        uint32_t best_edge = UINT32_MAX;
+        float best_quality = -FLT_MAX;
+
+        for (uint32_t i = 0; i < front_count; i++) {
+            if (!front_active[i]) continue;
+
+            float quality;
+            uint32_t candidate = find_best_front_vertex(
+                mesh,
+                front_v0[i], front_v1[i],
+                is_boundary, is_used,
+                mesh->vertex_count,
+                hole->normal,
+                &quality
+            );
+
+            if (candidate != UINT32_MAX && quality > best_quality) {
+                best_quality = quality;
+                best_edge = i;
+            }
+        }
+
+        if (best_edge == UINT32_MAX) {
+            /* No suitable vertex found - close remaining front */
+            for (uint32_t i = 0; i < front_count; i++) {
+                if (front_active[i]) {
+                    uint32_t v0 = front_v0[i];
+                    uint32_t v1 = front_v1[i];
+
+                    /* Find matching edge to close */
+                    for (uint32_t j = i + 1; j < front_count; j++) {
+                        if (front_active[j] && front_v0[j] == v1) {
+                            uint32_t v2 = front_v1[j];
+                            geomlib_trimesh_add_triangle(mesh, v0, v1, v2);
+                            front_active[i] = false;
+                            front_active[j] = false;
+                            break;
+                        }
+                    }
+                }
+            }
+            break;
+        }
+
+        /* Add triangle with best edge */
+        uint32_t v0 = front_v0[best_edge];
+        uint32_t v1 = front_v1[best_edge];
+
+        float quality;
+        uint32_t v2 = find_best_front_vertex(
+            mesh, v0, v1,
+            is_boundary, is_used,
+            mesh->vertex_count,
+            hole->normal,
+            &quality
+        );
+
+        geomlib_trimesh_add_triangle(mesh, v0, v1, v2);
+
+        /* Update front: mark current edge inactive */
+        front_active[best_edge] = false;
+
+        /* Add new edges v0->v2 and v2->v1 if not closing hole */
+        bool found_v0v2 = false;
+        bool found_v2v1 = false;
+
+        for (uint32_t i = 0; i < front_count; i++) {
+            if (!front_active[i]) continue;
+            if (front_v0[i] == v0 && front_v1[i] == v2) found_v0v2 = true;
+            if (front_v0[i] == v2 && front_v1[i] == v1) found_v2v1 = true;
+        }
+
+        if (!found_v0v2 && front_count < front_capacity) {
+            front_v0[front_count] = v0;
+            front_v1[front_count] = v2;
+            front_active[front_count] = true;
+            front_count++;
+        }
+
+        if (!found_v2v1 && front_count < front_capacity) {
+            front_v0[front_count] = v2;
+            front_v1[front_count] = v1;
+            front_active[front_count] = true;
+            front_count++;
+        }
+
+        is_used[v2] = true;
+
+        /* Count remaining active edges */
+        size_t active_count = 0;
+        for (uint32_t i = 0; i < front_count; i++) {
+            if (front_active[i]) active_count++;
+        }
+
+        if (active_count == 0) break;
+    }
+
+    /* Cleanup */
+    free(front_v0);
+    free(front_v1);
+    free(front_active);
+    free(is_boundary);
+    free(is_used);
+
+    /* Apply smoothing if requested */
+    if (params->fair_interior && params->smooth_iterations > 0) {
+        geomlib_smooth_hole_interior(mesh, hole, hole->boundary_vertices,
+                                       hole->vertex_count, params->smooth_iterations);
+    }
+
+    return GEOMLIB_MESH_SUCCESS;
 }
 
 /* ============================================================================
