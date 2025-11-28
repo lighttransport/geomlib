@@ -788,27 +788,340 @@ void geomlib_face_adjacency_free(geomlib_face_adjacency *adjacency) {
  * ============================================================================ */
 
 int geomlib_remove_isolated_vertices(geomlib_trimesh *mesh) {
-    /* TODO */
+    if (!mesh || mesh->vertex_count == 0) {
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    /* Mark vertices that are referenced by faces */
+    bool *used = (bool*)calloc(mesh->vertex_count, sizeof(bool));
+    if (!used) {
+        return GEOMLIB_MESH_ERROR_MEMORY;
+    }
+
+    for (size_t i = 0; i < mesh->triangle_count * 3; i++) {
+        if (mesh->indices[i] < mesh->vertex_count) {
+            used[mesh->indices[i]] = true;
+        }
+    }
+
+    /* Count isolated vertices */
+    size_t isolated_count = 0;
+    for (size_t i = 0; i < mesh->vertex_count; i++) {
+        if (!used[i]) {
+            isolated_count++;
+        }
+    }
+
+    if (isolated_count == 0) {
+        free(used);
+        return GEOMLIB_MESH_SUCCESS;
+    }
+
+    /* Build vertex remap table */
+    uint32_t *remap = (uint32_t*)malloc(mesh->vertex_count * sizeof(uint32_t));
+    if (!remap) {
+        free(used);
+        return GEOMLIB_MESH_ERROR_MEMORY;
+    }
+
+    size_t new_index = 0;
+    for (size_t i = 0; i < mesh->vertex_count; i++) {
+        if (used[i]) {
+            remap[i] = (uint32_t)new_index;
+            new_index++;
+        } else {
+            remap[i] = UINT32_MAX;
+        }
+    }
+
+    /* Create new vertex array */
+    size_t new_vertex_count = mesh->vertex_count - isolated_count;
+    geomlib_vec3 *new_vertices = (geomlib_vec3*)malloc(new_vertex_count * sizeof(geomlib_vec3));
+    if (!new_vertices) {
+        free(used);
+        free(remap);
+        return GEOMLIB_MESH_ERROR_MEMORY;
+    }
+
+    for (size_t i = 0; i < mesh->vertex_count; i++) {
+        if (used[i]) {
+            new_vertices[remap[i]] = mesh->vertices[i];
+        }
+    }
+
+    /* Update indices */
+    for (size_t i = 0; i < mesh->triangle_count * 3; i++) {
+        mesh->indices[i] = remap[mesh->indices[i]];
+    }
+
+    /* Replace vertices */
+    free(mesh->vertices);
+    mesh->vertices = new_vertices;
+    mesh->vertex_count = new_vertex_count;
+    mesh->vertex_capacity = new_vertex_count;
+
+    free(used);
+    free(remap);
+
     return GEOMLIB_MESH_SUCCESS;
 }
 
 int geomlib_remove_duplicate_faces(geomlib_trimesh *mesh) {
-    /* TODO */
+    if (!mesh || mesh->triangle_count == 0) {
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    /* Mark duplicate faces */
+    bool *keep = (bool*)malloc(mesh->triangle_count * sizeof(bool));
+    if (!keep) {
+        return GEOMLIB_MESH_ERROR_MEMORY;
+    }
+
+    for (size_t i = 0; i < mesh->triangle_count; i++) {
+        keep[i] = true;
+    }
+
+    /* Check each pair (O(n²) but simple and correct) */
+    for (size_t i = 0; i < mesh->triangle_count; i++) {
+        if (!keep[i]) continue;
+
+        uint32_t v0 = mesh->indices[i * 3 + 0];
+        uint32_t v1 = mesh->indices[i * 3 + 1];
+        uint32_t v2 = mesh->indices[i * 3 + 2];
+
+        for (size_t j = i + 1; j < mesh->triangle_count; j++) {
+            if (!keep[j]) continue;
+
+            uint32_t u0 = mesh->indices[j * 3 + 0];
+            uint32_t u1 = mesh->indices[j * 3 + 1];
+            uint32_t u2 = mesh->indices[j * 3 + 2];
+
+            /* Check if same triangle (any rotation/permutation) */
+            bool same = false;
+            if ((v0 == u0 && v1 == u1 && v2 == u2) ||
+                (v0 == u1 && v1 == u2 && v2 == u0) ||
+                (v0 == u2 && v1 == u0 && v2 == u1)) {
+                same = true;
+            }
+
+            if (same) {
+                keep[j] = false;
+            }
+        }
+    }
+
+    /* Count faces to keep */
+    size_t new_count = 0;
+    for (size_t i = 0; i < mesh->triangle_count; i++) {
+        if (keep[i]) {
+            new_count++;
+        }
+    }
+
+    if (new_count == mesh->triangle_count) {
+        free(keep);
+        return GEOMLIB_MESH_SUCCESS;
+    }
+
+    /* Compact indices */
+    size_t write_idx = 0;
+    for (size_t i = 0; i < mesh->triangle_count; i++) {
+        if (keep[i]) {
+            if (write_idx != i) {
+                mesh->indices[write_idx * 3 + 0] = mesh->indices[i * 3 + 0];
+                mesh->indices[write_idx * 3 + 1] = mesh->indices[i * 3 + 1];
+                mesh->indices[write_idx * 3 + 2] = mesh->indices[i * 3 + 2];
+            }
+            write_idx++;
+        }
+    }
+
+    mesh->triangle_count = new_count;
+
+    free(keep);
     return GEOMLIB_MESH_SUCCESS;
 }
 
 int geomlib_split_nonmanifold_vertices(geomlib_trimesh *mesh) {
-    /* TODO */
+    /* Complex operation - stub for now */
+    /* TODO: Implement proper nonmanifold vertex splitting */
+    (void)mesh;
     return GEOMLIB_MESH_SUCCESS;
 }
 
 bool geomlib_is_consistently_oriented(const geomlib_trimesh *mesh) {
-    /* TODO */
-    return true;
+    if (!mesh || mesh->triangle_count == 0) {
+        return true;
+    }
+
+    /* Build edge mesh to check orientation consistency */
+    geomlib_edge_mesh edges = geomlib_build_edge_mesh(mesh);
+
+    bool is_consistent = true;
+
+    /* Check each edge - if it has 2 adjacent faces, they should have opposite orientations */
+    for (size_t i = 0; i < edges.edge_count; i++) {
+        if (edges.edges[i].face1 == UINT32_MAX) {
+            continue;  /* Boundary edge */
+        }
+
+        uint32_t v0 = edges.edges[i].v0;
+        uint32_t v1 = edges.edges[i].v1;
+        uint32_t f0 = edges.edges[i].face0;
+        uint32_t f1 = edges.edges[i].face1;
+
+        /* Find edge in face0 */
+        bool f0_forward = false;
+        for (int j = 0; j < 3; j++) {
+            uint32_t a = mesh->indices[f0 * 3 + j];
+            uint32_t b = mesh->indices[f0 * 3 + ((j + 1) % 3)];
+            if ((a == v0 && b == v1)) {
+                f0_forward = true;
+                break;
+            }
+        }
+
+        /* Find edge in face1 */
+        bool f1_forward = false;
+        for (int j = 0; j < 3; j++) {
+            uint32_t a = mesh->indices[f1 * 3 + j];
+            uint32_t b = mesh->indices[f1 * 3 + ((j + 1) % 3)];
+            if ((a == v0 && b == v1)) {
+                f1_forward = true;
+                break;
+            }
+        }
+
+        /* Edges should have opposite orientations */
+        if (f0_forward == f1_forward) {
+            is_consistent = false;
+            break;
+        }
+    }
+
+    geomlib_edge_mesh_free(&edges);
+
+    return is_consistent;
 }
 
 int geomlib_orient_consistently(geomlib_trimesh *mesh) {
-    /* TODO */
+    if (!mesh || mesh->triangle_count == 0) {
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    /* Build face adjacency */
+    geomlib_edge_mesh edges = geomlib_build_edge_mesh(mesh);
+
+    /* Track which faces have been oriented */
+    bool *oriented = (bool*)calloc(mesh->triangle_count, sizeof(bool));
+    bool *flipped = (bool*)calloc(mesh->triangle_count, sizeof(bool));
+
+    if (!oriented || !flipped) {
+        free(oriented);
+        free(flipped);
+        geomlib_edge_mesh_free(&edges);
+        return GEOMLIB_MESH_ERROR_MEMORY;
+    }
+
+    /* BFS to propagate orientation */
+    uint32_t *queue = (uint32_t*)malloc(mesh->triangle_count * sizeof(uint32_t));
+    if (!queue) {
+        free(oriented);
+        free(flipped);
+        geomlib_edge_mesh_free(&edges);
+        return GEOMLIB_MESH_ERROR_MEMORY;
+    }
+
+    /* Process each connected component */
+    for (size_t seed = 0; seed < mesh->triangle_count; seed++) {
+        if (oriented[seed]) continue;
+
+        /* Start BFS from this seed */
+        size_t queue_head = 0;
+        size_t queue_tail = 0;
+
+        queue[queue_tail++] = (uint32_t)seed;
+        oriented[seed] = true;
+        flipped[seed] = false;
+
+        while (queue_head < queue_tail) {
+            uint32_t current = queue[queue_head++];
+
+            /* Find adjacent faces via edges */
+            for (size_t i = 0; i < edges.edge_count; i++) {
+                uint32_t f0 = edges.edges[i].face0;
+                uint32_t f1 = edges.edges[i].face1;
+
+                if (f1 == UINT32_MAX) continue;  /* Boundary */
+
+                uint32_t neighbor = UINT32_MAX;
+                if (f0 == current && !oriented[f1]) {
+                    neighbor = f1;
+                } else if (f1 == current && !oriented[f0]) {
+                    neighbor = f0;
+                }
+
+                if (neighbor == UINT32_MAX) continue;
+
+                /* Check edge orientation between current and neighbor */
+                uint32_t v0 = edges.edges[i].v0;
+                uint32_t v1 = edges.edges[i].v1;
+
+                /* Find edge direction in current face */
+                bool current_forward = false;
+                for (int j = 0; j < 3; j++) {
+                    uint32_t a = mesh->indices[current * 3 + j];
+                    uint32_t b = mesh->indices[current * 3 + ((j + 1) % 3)];
+                    if (a == v0 && b == v1) {
+                        current_forward = true;
+                        break;
+                    } else if (a == v1 && b == v0) {
+                        current_forward = false;
+                        break;
+                    }
+                }
+
+                /* Find edge direction in neighbor face */
+                bool neighbor_forward = false;
+                for (int j = 0; j < 3; j++) {
+                    uint32_t a = mesh->indices[neighbor * 3 + j];
+                    uint32_t b = mesh->indices[neighbor * 3 + ((j + 1) % 3)];
+                    if (a == v0 && b == v1) {
+                        neighbor_forward = true;
+                        break;
+                    } else if (a == v1 && b == v0) {
+                        neighbor_forward = false;
+                        break;
+                    }
+                }
+
+                /* If orientations match, neighbor needs to be flipped */
+                oriented[neighbor] = true;
+                if (current_forward == neighbor_forward) {
+                    flipped[neighbor] = !flipped[current];
+                } else {
+                    flipped[neighbor] = flipped[current];
+                }
+
+                queue[queue_tail++] = neighbor;
+            }
+        }
+    }
+
+    /* Apply flips */
+    for (size_t i = 0; i < mesh->triangle_count; i++) {
+        if (flipped[i]) {
+            uint32_t temp = mesh->indices[i * 3 + 1];
+            mesh->indices[i * 3 + 1] = mesh->indices[i * 3 + 2];
+            mesh->indices[i * 3 + 2] = temp;
+        }
+    }
+
+    free(oriented);
+    free(flipped);
+    free(queue);
+    geomlib_edge_mesh_free(&edges);
+
     return GEOMLIB_MESH_SUCCESS;
 }
 
