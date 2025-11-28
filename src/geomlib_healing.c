@@ -4,6 +4,7 @@
  */
 
 #include "geomlib/geomlib_healing.h"
+#include "geomlib/geomlib_holefill.h"
 #include "geomlib/geomlib_random.h"
 #include <stdlib.h>
 #include <string.h>
@@ -560,13 +561,39 @@ int geomlib_fill_holes(
     geomlib_trimesh *mesh,
     int max_hole_edges
 ) {
-    // TODO: Implement hole filling
-    // This is complex and would require:
-    // 1. Detect boundary loops using half-edge structure
-    // 2. For each loop, use advancing front or ear clipping
-    // 3. Add new triangles to mesh
+    if (!mesh) return GEOMLIB_MESH_ERROR_INVALID;
 
-    return 0; // Not implemented yet
+    /* Detect holes in the mesh */
+    geomlib_holes holes = geomlib_detect_holes(mesh);
+    if (holes.hole_count == 0) {
+        geomlib_holes_free(&holes);
+        return 0;
+    }
+
+    /* Count filled holes */
+    int filled_count = 0;
+
+    /* Setup fill parameters with natural fill method */
+    geomlib_fill_params params = geomlib_fill_params_default(GEOMLIB_FILL_NATURAL);
+    params.fair_interior = 1;
+    params.smooth_iterations = 5;
+
+    /* Fill each hole */
+    for (size_t i = 0; i < holes.hole_count; i++) {
+        /* Skip holes larger than max_hole_edges if specified */
+        if (max_hole_edges > 0 && (int)holes.holes[i].vertex_count > max_hole_edges) {
+            continue;
+        }
+
+        /* Fill the hole */
+        int result = geomlib_fill_hole(mesh, &holes.holes[i], &params);
+        if (result == GEOMLIB_MESH_SUCCESS) {
+            filled_count++;
+        }
+    }
+
+    geomlib_holes_free(&holes);
+    return filled_count;
 }
 
 int geomlib_repair_mesh(
