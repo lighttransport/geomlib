@@ -45,3 +45,7 @@ add_test(NAME test_collision COMMAND test_collision)
 add_executable(test_advanced_features test_advanced_features.cpp)
 target_link_libraries(test_advanced_features PRIVATE geomlib)
 add_test(NAME test_advanced_features COMMAND test_advanced_features)
+
+add_executable(test_optimize test_optimize.cpp)
+target_link_libraries(test_optimize PRIVATE geomlib)
+add_test(NAME test_optimize COMMAND test_optimize)
