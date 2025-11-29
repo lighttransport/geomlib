@@ -787,8 +787,114 @@ geomlib_optimize_result geomlib_optimize_mesh(
 }
 
 /* ============================================================================
- * Triangle Strips (Stub Implementation)
+ * Triangle Strips
  * ============================================================================ */
+
+/* Build adjacency for stripification */
+static void build_triangle_adjacency(
+    const geomlib_trimesh *mesh,
+    uint32_t **adjacency  /* 3 neighbors per triangle */
+) {
+    *adjacency = (uint32_t*)malloc(mesh->triangle_count * 3 * sizeof(uint32_t));
+
+    /* Initialize all to no neighbor */
+    for (size_t i = 0; i < mesh->triangle_count * 3; i++) {
+        (*adjacency)[i] = UINT32_MAX;
+    }
+
+    /* Find neighbors by matching edges */
+    for (size_t i = 0; i < mesh->triangle_count; i++) {
+        for (int ei = 0; ei < 3; ei++) {
+            if ((*adjacency)[i * 3 + ei] != UINT32_MAX) continue;
+
+            uint32_t v0 = mesh->indices[i * 3 + ei];
+            uint32_t v1 = mesh->indices[i * 3 + ((ei + 1) % 3)];
+
+            /* Search for matching edge in other triangles */
+            for (size_t j = i + 1; j < mesh->triangle_count; j++) {
+                for (int ej = 0; ej < 3; ej++) {
+                    uint32_t u0 = mesh->indices[j * 3 + ej];
+                    uint32_t u1 = mesh->indices[j * 3 + ((ej + 1) % 3)];
+
+                    /* Edges match if reversed (manifold mesh) */
+                    if (v0 == u1 && v1 == u0) {
+                        (*adjacency)[i * 3 + ei] = (uint32_t)j;
+                        (*adjacency)[j * 3 + ej] = (uint32_t)i;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/* Greedy strip extraction */
+static geomlib_tristrip extract_strip(
+    const geomlib_trimesh *mesh,
+    const uint32_t *adjacency,
+    bool *used,
+    uint32_t start_tri,
+    bool use_restart
+) {
+    geomlib_tristrip strip;
+    strip.uses_restart = use_restart;
+    strip.restart_index = UINT32_MAX;
+
+    size_t capacity = 128;
+    strip.indices = (uint32_t*)malloc(capacity * sizeof(uint32_t));
+    strip.index_count = 0;
+
+    /* Add first triangle */
+    used[start_tri] = true;
+    strip.indices[strip.index_count++] = mesh->indices[start_tri * 3 + 0];
+    strip.indices[strip.index_count++] = mesh->indices[start_tri * 3 + 1];
+    strip.indices[strip.index_count++] = mesh->indices[start_tri * 3 + 2];
+
+    uint32_t current_tri = start_tri;
+    uint32_t edge = 0;  /* Try edge 0 first */
+
+    /* Extend strip as far as possible */
+    while (true) {
+        /* Find next triangle */
+        uint32_t next_tri = UINT32_MAX;
+        uint32_t next_edge = 0;
+
+        /* Try all edges */
+        for (int e = 0; e < 3; e++) {
+            uint32_t candidate = adjacency[current_tri * 3 + e];
+            if (candidate != UINT32_MAX && !used[candidate]) {
+                next_tri = candidate;
+                next_edge = e;
+                break;
+            }
+        }
+
+        if (next_tri == UINT32_MAX) break;
+
+        /* Add next vertex */
+        used[next_tri] = true;
+
+        /* Find the vertex not on the shared edge */
+        uint32_t v0 = mesh->indices[current_tri * 3 + next_edge];
+        uint32_t v1 = mesh->indices[current_tri * 3 + ((next_edge + 1) % 3)];
+
+        for (int i = 0; i < 3; i++) {
+            uint32_t v = mesh->indices[next_tri * 3 + i];
+            if (v != v0 && v != v1) {
+                if (strip.index_count >= capacity) {
+                    capacity *= 2;
+                    strip.indices = (uint32_t*)realloc(strip.indices, capacity * sizeof(uint32_t));
+                }
+                strip.indices[strip.index_count++] = v;
+                break;
+            }
+        }
+
+        current_tri = next_tri;
+    }
+
+    return strip;
+}
 
 geomlib_tristrip_group geomlib_generate_tristrips(
     const geomlib_trimesh *mesh,
@@ -797,6 +903,38 @@ geomlib_tristrip_group geomlib_generate_tristrips(
     geomlib_tristrip_group group;
     group.strips = NULL;
     group.strip_count = 0;
+
+    if (!mesh || mesh->triangle_count == 0) {
+        return group;
+    }
+
+    /* Build adjacency */
+    uint32_t *adjacency;
+    build_triangle_adjacency(mesh, &adjacency);
+
+    /* Track used triangles */
+    bool *used = (bool*)calloc(mesh->triangle_count, sizeof(bool));
+
+    /* Extract strips */
+    size_t capacity = 16;
+    group.strips = (geomlib_tristrip*)malloc(capacity * sizeof(geomlib_tristrip));
+
+    for (size_t i = 0; i < mesh->triangle_count; i++) {
+        if (used[i]) continue;
+
+        geomlib_tristrip strip = extract_strip(mesh, adjacency, used, (uint32_t)i, use_restart);
+
+        if (group.strip_count >= capacity) {
+            capacity *= 2;
+            group.strips = (geomlib_tristrip*)realloc(group.strips, capacity * sizeof(geomlib_tristrip));
+        }
+
+        group.strips[group.strip_count++] = strip;
+    }
+
+    free(adjacency);
+    free(used);
+
     return group;
 }
 
@@ -808,8 +946,45 @@ void geomlib_tristrip_group_free(geomlib_tristrip_group *group) {
 }
 
 /* ============================================================================
- * Index Compression (Stub Implementation)
+ * Index Compression (Delta + Variable-Length Encoding)
  * ============================================================================ */
+
+/* Encode unsigned int with variable-length encoding */
+static size_t encode_varint(uint32_t value, uint8_t *buffer) {
+    size_t bytes = 0;
+    while (value >= 128) {
+        buffer[bytes++] = (uint8_t)((value & 0x7F) | 0x80);
+        value >>= 7;
+    }
+    buffer[bytes++] = (uint8_t)value;
+    return bytes;
+}
+
+/* Decode variable-length encoded int */
+static size_t decode_varint(const uint8_t *buffer, uint32_t *value) {
+    *value = 0;
+    size_t shift = 0;
+    size_t bytes = 0;
+
+    while (true) {
+        uint8_t byte = buffer[bytes++];
+        *value |= ((uint32_t)(byte & 0x7F)) << shift;
+        if ((byte & 0x80) == 0) break;
+        shift += 7;
+        if (shift >= 32) break;  /* Prevent overflow */
+    }
+
+    return bytes;
+}
+
+/* Zig-zag encoding for signed deltas */
+static uint32_t zigzag_encode(int32_t value) {
+    return (uint32_t)((value << 1) ^ (value >> 31));
+}
+
+static int32_t zigzag_decode(uint32_t value) {
+    return (int32_t)((value >> 1) ^ (-(int32_t)(value & 1)));
+}
 
 geomlib_compressed_indices geomlib_compress_indices(
     const uint32_t *indices,
@@ -817,10 +992,42 @@ geomlib_compressed_indices geomlib_compress_indices(
     uint32_t vertex_count
 ) {
     geomlib_compressed_indices compressed;
-    compressed.data = NULL;
-    compressed.compressed_size = 0;
     compressed.original_count = index_count;
     compressed.vertex_count = vertex_count;
+
+    if (!indices || index_count == 0) {
+        compressed.data = NULL;
+        compressed.compressed_size = 0;
+        return compressed;
+    }
+
+    /* Worst case: 5 bytes per index + header */
+    size_t max_size = index_count * 5 + 16;
+    compressed.data = (uint8_t*)malloc(max_size);
+    compressed.compressed_size = 0;
+
+    /* Encode using delta encoding */
+    uint32_t last_index = 0;
+
+    for (size_t i = 0; i < index_count; i++) {
+        /* Compute delta */
+        int32_t delta = (int32_t)(indices[i] - last_index);
+
+        /* Zig-zag encode delta (converts signed to unsigned) */
+        uint32_t encoded = zigzag_encode(delta);
+
+        /* Variable-length encode */
+        compressed.compressed_size += encode_varint(
+            encoded,
+            compressed.data + compressed.compressed_size
+        );
+
+        last_index = indices[i];
+    }
+
+    /* Shrink to actual size */
+    compressed.data = (uint8_t*)realloc(compressed.data, compressed.compressed_size);
+
     return compressed;
 }
 
@@ -828,7 +1035,31 @@ int geomlib_decompress_indices(
     const geomlib_compressed_indices *compressed,
     uint32_t *indices
 ) {
-    return GEOMLIB_MESH_ERROR_INVALID;
+    if (!compressed || !compressed->data || !indices) {
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    size_t offset = 0;
+    uint32_t last_index = 0;
+
+    for (size_t i = 0; i < compressed->original_count; i++) {
+        if (offset >= compressed->compressed_size) {
+            return GEOMLIB_MESH_ERROR_INVALID;
+        }
+
+        /* Decode variable-length int */
+        uint32_t encoded;
+        offset += decode_varint(compressed->data + offset, &encoded);
+
+        /* Zig-zag decode */
+        int32_t delta = zigzag_decode(encoded);
+
+        /* Reconstruct index */
+        indices[i] = last_index + (uint32_t)delta;
+        last_index = indices[i];
+    }
+
+    return GEOMLIB_MESH_SUCCESS;
 }
 
 void geomlib_compressed_indices_free(geomlib_compressed_indices *compressed) {
