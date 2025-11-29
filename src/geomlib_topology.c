@@ -804,20 +804,64 @@ geomlib_self_intersection geomlib_detect_self_intersections(
         return result;  /* Failed to build BVH */
     }
 
-    /* Allocate space for intersection pairs (worst case: all pairs intersect) */
-    size_t max_pairs = (mesh->triangle_count * (mesh->triangle_count - 1)) / 2;
+    /* Allocate space for intersection pairs */
+    size_t max_pairs = mesh->triangle_count * 8;  /* Conservative estimate */
     geomlib_intersection_pair *temp_pairs = (geomlib_intersection_pair*)malloc(
         max_pairs * sizeof(geomlib_intersection_pair));
     size_t pair_count = 0;
 
-    /* Check each triangle against all others */
-    /* TODO: Use BVH traversal to avoid O(n²) - for now using brute force with BVH AABB culling */
+    /* Precompute triangle AABBs for faster queries */
+    geomlib_aabb *tri_aabbs = (geomlib_aabb*)malloc(mesh->triangle_count * sizeof(geomlib_aabb));
+    geomlib_vec3 *tri_centers = (geomlib_vec3*)malloc(mesh->triangle_count * sizeof(geomlib_vec3));
+
+    for (size_t i = 0; i < mesh->triangle_count; i++) {
+        geomlib_vec3 v0 = mesh->vertices[mesh->indices[i * 3 + 0]];
+        geomlib_vec3 v1 = mesh->vertices[mesh->indices[i * 3 + 1]];
+        geomlib_vec3 v2 = mesh->vertices[mesh->indices[i * 3 + 2]];
+
+        tri_aabbs[i].min = v0;
+        tri_aabbs[i].max = v0;
+        tri_aabbs[i].min.x = fminf(tri_aabbs[i].min.x, fminf(v1.x, v2.x));
+        tri_aabbs[i].min.y = fminf(tri_aabbs[i].min.y, fminf(v1.y, v2.y));
+        tri_aabbs[i].min.z = fminf(tri_aabbs[i].min.z, fminf(v1.z, v2.z));
+        tri_aabbs[i].max.x = fmaxf(tri_aabbs[i].max.x, fmaxf(v1.x, v2.x));
+        tri_aabbs[i].max.y = fmaxf(tri_aabbs[i].max.y, fmaxf(v1.y, v2.y));
+        tri_aabbs[i].max.z = fmaxf(tri_aabbs[i].max.z, fmaxf(v1.z, v2.z));
+
+        tri_centers[i] = geomlib_vec3_mul(geomlib_vec3_add(
+            geomlib_vec3_add(v0, v1), v2), 1.0f / 3.0f);
+    }
+
+    /* Use BVH for spatial queries - check each triangle against nearby candidates */
     for (size_t i = 0; i < mesh->triangle_count; i++) {
         geomlib_vec3 a0 = mesh->vertices[mesh->indices[i * 3 + 0]];
         geomlib_vec3 a1 = mesh->vertices[mesh->indices[i * 3 + 1]];
         geomlib_vec3 a2 = mesh->vertices[mesh->indices[i * 3 + 2]];
 
-        for (size_t j = i + 1; j < mesh->triangle_count; j++) {
+        /* Compute search radius from AABB diagonal */
+        geomlib_vec3 aabb_size = geomlib_vec3_sub(tri_aabbs[i].max, tri_aabbs[i].min);
+        float search_radius = geomlib_vec3_length(aabb_size) * 1.5f;  /* Include some margin */
+
+        /* Query BVH for nearby triangles using radius search */
+        uint32_t candidates[256];  /* Stack buffer for candidates */
+        geomlib_vec3 points_buf[256];
+        float dists_buf[256];
+        size_t candidate_count = geomlib_bvh_radius_query(
+            &bvh, tri_centers[i], search_radius, 256,
+            points_buf, dists_buf, candidates);
+
+        /* Test against candidates */
+        for (size_t c = 0; c < candidate_count; c++) {
+            size_t j = candidates[c];
+
+            /* Skip self and already-tested pairs */
+            if (j <= i) continue;
+
+            /* Quick AABB overlap test */
+            if (!geomlib_aabb_intersects(tri_aabbs[i], tri_aabbs[j])) {
+                continue;
+            }
+
             geomlib_vec3 b0 = mesh->vertices[mesh->indices[j * 3 + 0]];
             geomlib_vec3 b1 = mesh->vertices[mesh->indices[j * 3 + 1]];
             geomlib_vec3 b2 = mesh->vertices[mesh->indices[j * 3 + 2]];
@@ -836,8 +880,15 @@ geomlib_self_intersection geomlib_detect_self_intersections(
                 continue;  /* Adjacent triangles */
             }
 
+            /* Full triangle-triangle intersection test */
             geomlib_vec3 intersection_point;
             if (triangles_intersect(a0, a1, a2, b0, b1, b2, &intersection_point)) {
+                if (pair_count >= max_pairs) {
+                    /* Grow array if needed */
+                    max_pairs *= 2;
+                    temp_pairs = (geomlib_intersection_pair*)realloc(temp_pairs,
+                        max_pairs * sizeof(geomlib_intersection_pair));
+                }
                 temp_pairs[pair_count].face0 = (uint32_t)i;
                 temp_pairs[pair_count].face1 = (uint32_t)j;
                 temp_pairs[pair_count].point = intersection_point;
@@ -846,6 +897,9 @@ geomlib_self_intersection geomlib_detect_self_intersections(
             }
         }
     }
+
+    free(tri_aabbs);
+    free(tri_centers);
 
     geomlib_bvh_free(&bvh);
 
@@ -1080,10 +1134,142 @@ int geomlib_remove_duplicate_faces(geomlib_trimesh *mesh) {
 }
 
 int geomlib_split_nonmanifold_vertices(geomlib_trimesh *mesh) {
-    /* Complex operation - stub for now */
-    /* TODO: Implement proper nonmanifold vertex splitting */
-    (void)mesh;
-    return GEOMLIB_MESH_SUCCESS;
+    if (!mesh || mesh->vertex_count == 0 || mesh->triangle_count == 0) {
+        return GEOMLIB_MESH_SUCCESS;
+    }
+
+    /* Build vertex adjacency to find which triangles use each vertex */
+    geomlib_vertex_adjacency adj = geomlib_build_vertex_adjacency(mesh);
+
+    int splits = 0;
+
+    /* Process each vertex */
+    for (size_t v = 0; v < mesh->vertex_count; v++) {
+        uint32_t tri_count = adj.face_counts[v];
+
+        if (tri_count < 2) continue;  /* Can't be nonmanifold with 0 or 1 triangles */
+
+        /* Check if triangles form a connected fan around vertex */
+        /* Track which triangles have been visited */
+        bool *visited = (bool*)calloc(tri_count, sizeof(bool));
+        uint32_t *components = (uint32_t*)malloc(tri_count * sizeof(uint32_t));
+        uint32_t component_count = 0;
+
+        /* Find connected components using triangle adjacency */
+        for (uint32_t i = 0; i < tri_count; i++) {
+            if (visited[i]) continue;
+
+            /* Start new component */
+            components[component_count] = 1;
+            visited[i] = true;
+
+            /* BFS to find connected triangles sharing edges */
+            uint32_t queue[256];  /* Stack buffer */
+            uint32_t queue_head = 0, queue_tail = 0;
+            queue[queue_tail++] = i;
+
+            while (queue_head < queue_tail && queue_tail < 256) {
+                uint32_t curr_local = queue[queue_head++];
+                uint32_t curr_tri = adj.faces[v][curr_local];
+
+                /* Find neighbors (triangles sharing an edge with current) */
+                for (uint32_t j = 0; j < tri_count; j++) {
+                    if (visited[j]) continue;
+
+                    uint32_t other_tri = adj.faces[v][j];
+
+                    /* Check if they share an edge (have 2 common vertices) */
+                    int common = 0;
+                    for (int ti = 0; ti < 3; ti++) {
+                        uint32_t tv = mesh->indices[curr_tri * 3 + ti];
+                        for (int oi = 0; oi < 3; oi++) {
+                            uint32_t ov = mesh->indices[other_tri * 3 + oi];
+                            if (tv == ov) common++;
+                        }
+                    }
+
+                    if (common >= 2) {
+                        /* Connected - add to component */
+                        visited[j] = true;
+                        components[component_count]++;
+                        if (queue_tail < 256) {
+                            queue[queue_tail++] = j;
+                        }
+                    }
+                }
+            }
+
+            component_count++;
+        }
+
+        /* If more than one component, vertex is nonmanifold - split it */
+        if (component_count > 1) {
+            /* For each component after the first, create a new vertex */
+            visited[0] = false;  /* Reuse visited array to mark components */
+            memset(visited, 0, tri_count * sizeof(bool));
+
+            uint32_t comp_idx = 0;
+            for (uint32_t i = 0; i < tri_count; i++) {
+                if (visited[i]) continue;
+
+                /* First component uses original vertex */
+                if (comp_idx == 0) {
+                    comp_idx++;
+                    continue;
+                }
+
+                /* Create new vertex (duplicate) */
+                uint32_t new_v = mesh->vertex_count;
+                geomlib_vec3 pos = mesh->vertices[v];
+                geomlib_vec3 *normal = mesh->normals ? &mesh->normals[v] : NULL;
+                geomlib_vec2 *texcoord = mesh->texcoords ? &mesh->texcoords[v] : NULL;
+
+                /* Add vertex manually (add_vertex uses vec3 for texcoords) */
+                if (mesh->vertex_count >= mesh->vertex_capacity) {
+                    /* Grow arrays */
+                    size_t new_cap = mesh->vertex_capacity * 2;
+                    mesh->vertices = (geomlib_vec3*)realloc(mesh->vertices, new_cap * sizeof(geomlib_vec3));
+                    if (mesh->normals) {
+                        mesh->normals = (geomlib_vec3*)realloc(mesh->normals, new_cap * sizeof(geomlib_vec3));
+                    }
+                    if (mesh->texcoords) {
+                        mesh->texcoords = (geomlib_vec2*)realloc(mesh->texcoords, new_cap * sizeof(geomlib_vec2));
+                    }
+                    mesh->vertex_capacity = new_cap;
+                }
+                mesh->vertices[new_v] = pos;
+                if (mesh->normals && normal) {
+                    mesh->normals[new_v] = *normal;
+                }
+                if (mesh->texcoords && texcoord) {
+                    mesh->texcoords[new_v] = *texcoord;
+                }
+                mesh->vertex_count++;
+
+                /* Update all triangles in this component to use new vertex */
+                for (uint32_t j = 0; j < tri_count; j++) {
+                    uint32_t tri = adj.faces[v][j];
+                    for (int k = 0; k < 3; k++) {
+                        if (mesh->indices[tri * 3 + k] == v) {
+                            mesh->indices[tri * 3 + k] = new_v;
+                            visited[j] = true;
+                            break;
+                        }
+                    }
+                }
+
+                splits++;
+                comp_idx++;
+            }
+        }
+
+        free(visited);
+        free(components);
+    }
+
+    geomlib_vertex_adjacency_free(&adj);
+
+    return splits;  /* Return number of split vertices */
 }
 
 bool geomlib_is_consistently_oriented(const geomlib_trimesh *mesh) {
