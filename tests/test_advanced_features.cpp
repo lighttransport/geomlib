@@ -236,8 +236,7 @@ int main() {
 
     int failures = 0;
 
-    // Note: test_advancing_front() disabled due to mesh structure issues
-    // failures += test_advancing_front();
+    failures += test_advancing_front();
     failures += test_marching_cubes();
     failures += test_self_intersection();
     failures += test_nonmanifold_splitting();

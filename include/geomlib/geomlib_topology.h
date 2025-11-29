@@ -58,6 +58,7 @@ typedef struct geomlib_edge {
 typedef struct geomlib_edge_mesh {
     geomlib_edge *edges;
     size_t edge_count;
+    size_t vertex_count;
 
     /* Per-vertex edge lists */
     uint32_t **vertex_edges;   /* Edges adjacent to each vertex */
