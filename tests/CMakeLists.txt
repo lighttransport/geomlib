@@ -41,3 +41,7 @@ add_test(NAME test_integration COMMAND test_integration)
 add_executable(test_collision test_collision.cpp)
 target_link_libraries(test_collision PRIVATE geomlib)
 add_test(NAME test_collision COMMAND test_collision)
+
+add_executable(test_advanced_features test_advanced_features.cpp)
+target_link_libraries(test_advanced_features PRIVATE geomlib)
+add_test(NAME test_advanced_features COMMAND test_advanced_features)
