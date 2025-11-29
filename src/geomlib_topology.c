@@ -132,6 +132,7 @@ geomlib_edge_mesh geomlib_build_edge_mesh(const geomlib_trimesh *mesh) {
 
     /* Build edge array */
     edge_mesh.edge_count = map.entry_count;
+    edge_mesh.vertex_count = mesh->vertex_count;
     edge_mesh.edges = (geomlib_edge*)malloc(edge_mesh.edge_count * sizeof(geomlib_edge));
 
     size_t edge_idx = 0;
@@ -179,7 +180,7 @@ geomlib_edge_mesh geomlib_build_edge_mesh(const geomlib_trimesh *mesh) {
 
 void geomlib_edge_mesh_free(geomlib_edge_mesh *edge_mesh) {
     free(edge_mesh->edges);
-    for (size_t i = 0; i < edge_mesh->edge_count; i++) {
+    for (size_t i = 0; i < edge_mesh->vertex_count; i++) {
         free(edge_mesh->vertex_edges[i]);
     }
     free(edge_mesh->vertex_edges);
