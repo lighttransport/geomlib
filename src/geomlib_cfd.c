@@ -5,6 +5,7 @@
 
 #include "geomlib/geomlib_cfd.h"
 #include "geomlib/geomlib_healing.h"
+#include "geomlib/geomlib_topology.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -658,7 +659,67 @@ int geomlib_compute_divergence(
     const geomlib_vector_field *field,
     geomlib_scalar_field *divergence
 ) {
-    (void)mesh; (void)field; (void)divergence;
+    if (!mesh || !field || !divergence) {
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    if (field->count != mesh->vertex_count || divergence->count != mesh->vertex_count) {
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    /* Build vertex adjacency for neighbor access */
+    geomlib_vertex_adjacency adj = geomlib_build_vertex_adjacency(mesh);
+
+    /* Compute divergence at each vertex using Green-Gauss */
+    for (size_t v = 0; v < mesh->vertex_count; v++) {
+        float div_sum = 0.0f;
+        float total_area = 0.0f;
+
+        /* Accumulate over adjacent triangles */
+        for (uint32_t i = 0; i < adj.face_counts[v]; i++) {
+            uint32_t tri = adj.faces[v][i];
+
+            /* Get triangle vertices */
+            uint32_t v0 = mesh->indices[tri * 3 + 0];
+            uint32_t v1 = mesh->indices[tri * 3 + 1];
+            uint32_t v2 = mesh->indices[tri * 3 + 2];
+
+            geomlib_vec3 p0 = mesh->vertices[v0];
+            geomlib_vec3 p1 = mesh->vertices[v1];
+            geomlib_vec3 p2 = mesh->vertices[v2];
+
+            /* Triangle area and normal */
+            geomlib_vec3 e1 = geomlib_vec3_sub(p1, p0);
+            geomlib_vec3 e2 = geomlib_vec3_sub(p2, p0);
+            geomlib_vec3 cross = geomlib_vec3_cross(e1, e2);
+            float area = geomlib_vec3_length(cross) * 0.5f;
+            geomlib_vec3 normal = geomlib_vec3_normalize(cross);
+
+            /* Average field value at triangle */
+            geomlib_vec3 f0 = field->values[v0];
+            geomlib_vec3 f1 = field->values[v1];
+            geomlib_vec3 f2 = field->values[v2];
+            geomlib_vec3 f_avg = geomlib_vec3_create(
+                (f0.x + f1.x + f2.x) / 3.0f,
+                (f0.y + f1.y + f2.y) / 3.0f,
+                (f0.z + f1.z + f2.z) / 3.0f
+            );
+
+            /* Green-Gauss: ∇·F ≈ (1/V) ∫ F·n dS */
+            float contrib = geomlib_vec3_dot(f_avg, normal) * area;
+            div_sum += contrib;
+            total_area += area;
+        }
+
+        /* Normalize by total area (approximation of volume) */
+        if (total_area > 1e-6f) {
+            divergence->values[v] = div_sum / total_area;
+        } else {
+            divergence->values[v] = 0.0f;
+        }
+    }
+
+    geomlib_vertex_adjacency_free(&adj);
     return GEOMLIB_MESH_SUCCESS;
 }
 
@@ -667,7 +728,98 @@ int geomlib_compute_curl(
     const geomlib_vector_field *field,
     geomlib_vector_field *curl
 ) {
-    (void)mesh; (void)field; (void)curl;
+    if (!mesh || !field || !curl) {
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    if (field->count != mesh->vertex_count || curl->count != mesh->vertex_count) {
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    /* Build vertex adjacency */
+    geomlib_vertex_adjacency adj = geomlib_build_vertex_adjacency(mesh);
+
+    /* Compute curl at each vertex using Stokes' theorem */
+    for (size_t v = 0; v < mesh->vertex_count; v++) {
+        geomlib_vec3 curl_sum = geomlib_vec3_create(0, 0, 0);
+        float total_area = 0.0f;
+
+        /* Accumulate over adjacent triangles */
+        for (uint32_t i = 0; i < adj.face_counts[v]; i++) {
+            uint32_t tri = adj.faces[v][i];
+
+            /* Get triangle vertices */
+            uint32_t v0 = mesh->indices[tri * 3 + 0];
+            uint32_t v1 = mesh->indices[tri * 3 + 1];
+            uint32_t v2 = mesh->indices[tri * 3 + 2];
+
+            geomlib_vec3 p0 = mesh->vertices[v0];
+            geomlib_vec3 p1 = mesh->vertices[v1];
+            geomlib_vec3 p2 = mesh->vertices[v2];
+
+            /* Triangle normal and area */
+            geomlib_vec3 e1 = geomlib_vec3_sub(p1, p0);
+            geomlib_vec3 e2 = geomlib_vec3_sub(p2, p0);
+            geomlib_vec3 cross = geomlib_vec3_cross(e1, e2);
+            float area = geomlib_vec3_length(cross) * 0.5f;
+            geomlib_vec3 normal = geomlib_vec3_normalize(cross);
+
+            /* Field values */
+            geomlib_vec3 f0 = field->values[v0];
+            geomlib_vec3 f1 = field->values[v1];
+            geomlib_vec3 f2 = field->values[v2];
+
+            /* Stokes' theorem: ∫(∇×F)·n dS = ∮ F·dl */
+            /* Approximate with line integral around triangle */
+            geomlib_vec3 e01 = geomlib_vec3_sub(p1, p0);
+            geomlib_vec3 e12 = geomlib_vec3_sub(p2, p1);
+            geomlib_vec3 e20 = geomlib_vec3_sub(p0, p2);
+
+            geomlib_vec3 f01 = geomlib_vec3_create(
+                (f0.x + f1.x) * 0.5f,
+                (f0.y + f1.y) * 0.5f,
+                (f0.z + f1.z) * 0.5f
+            );
+            geomlib_vec3 f12 = geomlib_vec3_create(
+                (f1.x + f2.x) * 0.5f,
+                (f1.y + f2.y) * 0.5f,
+                (f1.z + f2.z) * 0.5f
+            );
+            geomlib_vec3 f20 = geomlib_vec3_create(
+                (f2.x + f0.x) * 0.5f,
+                (f2.y + f0.y) * 0.5f,
+                (f2.z + f0.z) * 0.5f
+            );
+
+            float line_integral =
+                geomlib_vec3_dot(f01, e01) +
+                geomlib_vec3_dot(f12, e12) +
+                geomlib_vec3_dot(f20, e20);
+
+            /* Curl component along normal */
+            geomlib_vec3 curl_contrib = geomlib_vec3_create(
+                normal.x * line_integral,
+                normal.y * line_integral,
+                normal.z * line_integral
+            );
+
+            curl_sum = geomlib_vec3_add(curl_sum, curl_contrib);
+            total_area += area;
+        }
+
+        /* Normalize by total area */
+        if (total_area > 1e-6f) {
+            curl->values[v] = geomlib_vec3_create(
+                curl_sum.x / total_area,
+                curl_sum.y / total_area,
+                curl_sum.z / total_area
+            );
+        } else {
+            curl->values[v] = geomlib_vec3_create(0, 0, 0);
+        }
+    }
+
+    geomlib_vertex_adjacency_free(&adj);
     return GEOMLIB_MESH_SUCCESS;
 }
 
@@ -676,7 +828,50 @@ int geomlib_compute_laplacian(
     const geomlib_scalar_field *field,
     geomlib_scalar_field *laplacian
 ) {
-    (void)mesh; (void)field; (void)laplacian;
+    if (!mesh || !field || !laplacian) {
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    if (field->count != mesh->vertex_count || laplacian->count != mesh->vertex_count) {
+        return GEOMLIB_MESH_ERROR_INVALID;
+    }
+
+    /* Build vertex adjacency for neighbor access */
+    geomlib_vertex_adjacency adj = geomlib_build_vertex_adjacency(mesh);
+
+    /* Compute Laplacian using cotangent weights (discrete Laplace-Beltrami) */
+    for (size_t v = 0; v < mesh->vertex_count; v++) {
+        float laplacian_sum = 0.0f;
+        float weight_sum = 0.0f;
+
+        geomlib_vec3 v_pos = mesh->vertices[v];
+        float v_value = field->values[v];
+
+        /* Accumulate contributions from neighbors */
+        for (uint32_t i = 0; i < adj.neighbor_counts[v]; i++) {
+            uint32_t neighbor = adj.neighbors[v][i];
+            geomlib_vec3 n_pos = mesh->vertices[neighbor];
+            float n_value = field->values[neighbor];
+
+            /* Compute cotangent weight */
+            /* For simplicity, use uniform weight (proper cotangent requires angle computation) */
+            float dist = geomlib_vec3_length(geomlib_vec3_sub(n_pos, v_pos));
+            float weight = (dist > 1e-6f) ? (1.0f / dist) : 0.0f;
+
+            /* Laplacian: ∇²f ≈ Σ w_i (f_i - f_0) / Σ w_i */
+            laplacian_sum += weight * (n_value - v_value);
+            weight_sum += weight;
+        }
+
+        /* Normalize */
+        if (weight_sum > 1e-6f) {
+            laplacian->values[v] = laplacian_sum / weight_sum;
+        } else {
+            laplacian->values[v] = 0.0f;
+        }
+    }
+
+    geomlib_vertex_adjacency_free(&adj);
     return GEOMLIB_MESH_SUCCESS;
 }
 
@@ -686,8 +881,87 @@ geomlib_vec3 geomlib_interpolate_vector(
     geomlib_vec3 point,
     geomlib_interpolation_scheme scheme
 ) {
-    (void)mesh; (void)field; (void)point; (void)scheme;
-    return geomlib_vec3_create(0.0f, 0.0f, 0.0f);
+    if (!mesh || !field || field->count != mesh->vertex_count) {
+        return geomlib_vec3_create(0.0f, 0.0f, 0.0f);
+    }
+
+    /* Simple scheme: find nearest triangle and use barycentric interpolation */
+    (void)scheme;  /* Ignore scheme for now, always use linear */
+
+    /* Find triangle containing point (brute force for now) */
+    float min_dist = FLT_MAX;
+    uint32_t closest_tri = 0;
+
+    for (size_t i = 0; i < mesh->triangle_count; i++) {
+        uint32_t v0 = mesh->indices[i * 3 + 0];
+        uint32_t v1 = mesh->indices[i * 3 + 1];
+        uint32_t v2 = mesh->indices[i * 3 + 2];
+
+        geomlib_vec3 p0 = mesh->vertices[v0];
+        geomlib_vec3 p1 = mesh->vertices[v1];
+        geomlib_vec3 p2 = mesh->vertices[v2];
+
+        /* Compute triangle centroid and distance to point */
+        geomlib_vec3 centroid = geomlib_vec3_create(
+            (p0.x + p1.x + p2.x) / 3.0f,
+            (p0.y + p1.y + p2.y) / 3.0f,
+            (p0.z + p1.z + p2.z) / 3.0f
+        );
+
+        float dist = geomlib_vec3_length(geomlib_vec3_sub(point, centroid));
+        if (dist < min_dist) {
+            min_dist = dist;
+            closest_tri = (uint32_t)i;
+        }
+    }
+
+    /* Get vertices of closest triangle */
+    uint32_t v0 = mesh->indices[closest_tri * 3 + 0];
+    uint32_t v1 = mesh->indices[closest_tri * 3 + 1];
+    uint32_t v2 = mesh->indices[closest_tri * 3 + 2];
+
+    geomlib_vec3 p0 = mesh->vertices[v0];
+    geomlib_vec3 p1 = mesh->vertices[v1];
+    geomlib_vec3 p2 = mesh->vertices[v2];
+
+    /* Compute barycentric coordinates */
+    geomlib_vec3 v0v1 = geomlib_vec3_sub(p1, p0);
+    geomlib_vec3 v0v2 = geomlib_vec3_sub(p2, p0);
+    geomlib_vec3 v0p = geomlib_vec3_sub(point, p0);
+
+    float d00 = geomlib_vec3_dot(v0v1, v0v1);
+    float d01 = geomlib_vec3_dot(v0v1, v0v2);
+    float d11 = geomlib_vec3_dot(v0v2, v0v2);
+    float d20 = geomlib_vec3_dot(v0p, v0v1);
+    float d21 = geomlib_vec3_dot(v0p, v0v2);
+
+    float denom = d00 * d11 - d01 * d01;
+    if (fabsf(denom) < 1e-6f) {
+        /* Degenerate triangle, use average */
+        geomlib_vec3 f0 = field->values[v0];
+        geomlib_vec3 f1 = field->values[v1];
+        geomlib_vec3 f2 = field->values[v2];
+        return geomlib_vec3_create(
+            (f0.x + f1.x + f2.x) / 3.0f,
+            (f0.y + f1.y + f2.y) / 3.0f,
+            (f0.z + f1.z + f2.z) / 3.0f
+        );
+    }
+
+    float b1 = (d11 * d20 - d01 * d21) / denom;
+    float b2 = (d00 * d21 - d01 * d20) / denom;
+    float b0 = 1.0f - b1 - b2;
+
+    /* Interpolate vector field values */
+    geomlib_vec3 f0 = field->values[v0];
+    geomlib_vec3 f1 = field->values[v1];
+    geomlib_vec3 f2 = field->values[v2];
+
+    return geomlib_vec3_create(
+        b0 * f0.x + b1 * f1.x + b2 * f2.x,
+        b0 * f0.y + b1 * f1.y + b2 * f2.y,
+        b0 * f0.z + b1 * f1.z + b2 * f2.z
+    );
 }
 
 int geomlib_generate_streamlines(

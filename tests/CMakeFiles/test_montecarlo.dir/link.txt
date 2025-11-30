@@ -1,0 +1,1 @@
+/usr/bin/c++  -fno-rtti -fno-exceptions -O3 -DNDEBUG CMakeFiles/test_montecarlo.dir/test_montecarlo.cpp.o -o test_montecarlo  ../libgeomlib.a -lm 

@@ -1,0 +1,1 @@
+/usr/bin/c++  -fno-rtti -fno-exceptions -O3 -DNDEBUG CMakeFiles/test_cfd.dir/test_cfd.cpp.o -o test_cfd  ../libgeomlib.a -lm 

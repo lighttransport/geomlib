@@ -1,0 +1,1 @@
+/usr/bin/c++  -fno-rtti -fno-exceptions -O3 -DNDEBUG CMakeFiles/test_mesh.dir/test_mesh.cpp.o -o test_mesh  ../libgeomlib.a -lm 

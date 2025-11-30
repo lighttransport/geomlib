@@ -1,0 +1,13 @@
+1:test_linalg
+2:test_linalg_extended
+3:test_solver
+4:test_mesh
+5:test_mesh_extended
+6:test_random
+7:test_montecarlo
+8:test_bvh
+9:test_bvh_extended
+10:test_integration
+11:test_collision
+12:test_advanced_features
+13:test_optimize

@@ -1,0 +1,1 @@
+/usr/bin/c++  -fno-rtti -fno-exceptions -O3 -DNDEBUG CMakeFiles/test_linalg_extended.dir/test_linalg_extended.cpp.o -o test_linalg_extended  ../libgeomlib.a -lm 

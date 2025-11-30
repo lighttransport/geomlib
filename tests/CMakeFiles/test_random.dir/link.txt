@@ -1,0 +1,1 @@
+/usr/bin/c++  -fno-rtti -fno-exceptions -O3 -DNDEBUG CMakeFiles/test_random.dir/test_random.cpp.o -o test_random  ../libgeomlib.a -lm 

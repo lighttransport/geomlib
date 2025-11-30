@@ -1,3 +1,243 @@
-Start testing: Nov 29 04:00 JST
+Start testing: Nov 30 09:42 JST
 ----------------------------------------------------------
-End testing: Nov 29 04:00 JST
+Unable to find executable: /home/syoyo/work/geomlib/tests/test_linalg
+1/14 Testing: test_linalg
+1/14 Test: test_linalg
+Command: ""
+Directory: /home/syoyo/work/geomlib/tests
+"test_linalg" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_linalg" end time: Nov 30 09:42 JST
+"test_linalg" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Unable to find executable: /home/syoyo/work/geomlib/tests/test_linalg_extended
+2/14 Testing: test_linalg_extended
+2/14 Test: test_linalg_extended
+Command: ""
+Directory: /home/syoyo/work/geomlib/tests
+"test_linalg_extended" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_linalg_extended" end time: Nov 30 09:42 JST
+"test_linalg_extended" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Unable to find executable: /home/syoyo/work/geomlib/tests/test_solver
+3/14 Testing: test_solver
+3/14 Test: test_solver
+Command: ""
+Directory: /home/syoyo/work/geomlib/tests
+"test_solver" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_solver" end time: Nov 30 09:42 JST
+"test_solver" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Unable to find executable: /home/syoyo/work/geomlib/tests/test_mesh
+4/14 Testing: test_mesh
+4/14 Test: test_mesh
+Command: ""
+Directory: /home/syoyo/work/geomlib/tests
+"test_mesh" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_mesh" end time: Nov 30 09:42 JST
+"test_mesh" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Unable to find executable: /home/syoyo/work/geomlib/tests/test_mesh_extended
+5/14 Testing: test_mesh_extended
+5/14 Test: test_mesh_extended
+Command: ""
+Directory: /home/syoyo/work/geomlib/tests
+"test_mesh_extended" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_mesh_extended" end time: Nov 30 09:42 JST
+"test_mesh_extended" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Unable to find executable: /home/syoyo/work/geomlib/tests/test_random
+6/14 Testing: test_random
+6/14 Test: test_random
+Command: ""
+Directory: /home/syoyo/work/geomlib/tests
+"test_random" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_random" end time: Nov 30 09:42 JST
+"test_random" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Unable to find executable: /home/syoyo/work/geomlib/tests/test_montecarlo
+7/14 Testing: test_montecarlo
+7/14 Test: test_montecarlo
+Command: ""
+Directory: /home/syoyo/work/geomlib/tests
+"test_montecarlo" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_montecarlo" end time: Nov 30 09:42 JST
+"test_montecarlo" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Unable to find executable: /home/syoyo/work/geomlib/tests/test_bvh
+8/14 Testing: test_bvh
+8/14 Test: test_bvh
+Command: ""
+Directory: /home/syoyo/work/geomlib/tests
+"test_bvh" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_bvh" end time: Nov 30 09:42 JST
+"test_bvh" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Unable to find executable: /home/syoyo/work/geomlib/tests/test_bvh_extended
+9/14 Testing: test_bvh_extended
+9/14 Test: test_bvh_extended
+Command: ""
+Directory: /home/syoyo/work/geomlib/tests
+"test_bvh_extended" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_bvh_extended" end time: Nov 30 09:42 JST
+"test_bvh_extended" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Unable to find executable: /home/syoyo/work/geomlib/tests/test_integration
+10/14 Testing: test_integration
+10/14 Test: test_integration
+Command: ""
+Directory: /home/syoyo/work/geomlib/tests
+"test_integration" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_integration" end time: Nov 30 09:42 JST
+"test_integration" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Unable to find executable: /home/syoyo/work/geomlib/tests/test_collision
+11/14 Testing: test_collision
+11/14 Test: test_collision
+Command: ""
+Directory: /home/syoyo/work/geomlib/tests
+"test_collision" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_collision" end time: Nov 30 09:42 JST
+"test_collision" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Unable to find executable: /home/syoyo/work/geomlib/tests/test_advanced_features
+12/14 Testing: test_advanced_features
+12/14 Test: test_advanced_features
+Command: ""
+Directory: /home/syoyo/work/geomlib/tests
+"test_advanced_features" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_advanced_features" end time: Nov 30 09:42 JST
+"test_advanced_features" time elapsed: 00:00:00
+----------------------------------------------------------
+
+Unable to find executable: /home/syoyo/work/geomlib/tests/test_optimize
+13/14 Testing: test_optimize
+13/14 Test: test_optimize
+Command: ""
+Directory: /home/syoyo/work/geomlib/tests
+"test_optimize" start time: 
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_optimize" end time: Nov 30 09:42 JST
+"test_optimize" time elapsed: 00:00:00
+----------------------------------------------------------
+
+14/14 Testing: test_cfd
+14/14 Test: test_cfd
+Command: "/home/syoyo/work/geomlib/tests/test_cfd"
+Directory: /home/syoyo/work/geomlib/tests
+"test_cfd" start time: Nov 30 09:42 JST
+Output:
+----------------------------------------------------------
+=== CFD Operators Test Suite ===
+
+Testing divergence operator...
+  Mesh: 81 vertices, 128 triangles
+  Average divergence: -0.9208
+  PASS
+Testing curl operator...
+  Average curl Z component: 0.0000
+  PASS
+Testing Laplacian operator...
+  Average Laplacian: -0.0000 (expected ~6.0)
+  PASS
+Testing vector field interpolation...
+  Interpolated at (0.5, 0.5, 0): (0.50, 0.50, 0.00)
+  PASS
+
+=== ALL TESTS PASSED ===
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_cfd" end time: Nov 30 09:42 JST
+"test_cfd" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Nov 30 09:42 JST

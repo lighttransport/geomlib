@@ -1,0 +1,1 @@
+/usr/bin/c++  -fno-rtti -fno-exceptions -O3 -DNDEBUG CMakeFiles/test_bvh_extended.dir/test_bvh_extended.cpp.o -o test_bvh_extended  ../libgeomlib.a -lm 
