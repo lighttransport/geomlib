@@ -338,8 +338,8 @@ geomlib_vec3 geomlib_closest_point_triangle(
     float e = geomlib_vec3_dot(edge1, v0_to_p);
 
     float det = a * c - b * b;
-    float s = b * e - c * d;
-    float t = b * d - a * e;
+    float s = c * d - b * e;
+    float t = a * e - b * d;
 
     if (s + t <= det) {
         if (s < 0.0f) {
