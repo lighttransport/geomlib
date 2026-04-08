@@ -34,16 +34,19 @@ extern "C" {
  * and deallocation. An opaque user_data pointer is passed to every callback.
  *
  * Requirements:
- * - malloc_fn must return a pointer aligned to at least _Alignof(max_align_t)
- *   or NULL on failure. When size is 0, behavior is implementation-defined
- *   (may return NULL or a unique pointer).
- * - realloc_fn must behave like C realloc: if ptr is NULL, acts like malloc.
- *   Returns NULL on failure without freeing the original pointer.
+ * - malloc_fn must return a pointer suitably aligned for the requested
+ *   alignment, or NULL on failure. When alignment is 0, the returned pointer
+ *   must be aligned to at least _Alignof(max_align_t) (system default).
+ *   When size is 0, behavior is implementation-defined (may return NULL or
+ *   a unique pointer).
+ * - realloc_fn must behave like C realloc: if ptr is NULL, acts like malloc
+ *   (with default alignment). Returns NULL on failure without freeing the
+ *   original pointer.
  * - free_fn must accept NULL (no-op) and free memory allocated by malloc_fn
  *   or realloc_fn.
  */
 typedef struct geomlib_allocator {
-    void* (*malloc_fn)(size_t size, void *user_data);
+    void* (*malloc_fn)(size_t size, size_t alignment, void *user_data);
     void* (*realloc_fn)(void *ptr, size_t new_size, void *user_data);
     void  (*free_fn)(void *ptr, void *user_data);
     void  *user_data;
@@ -88,8 +91,17 @@ const geomlib_allocator* geomlib_default_allocator(void);
 /**
  * Allocate memory through the global allocator.
  * Returns NULL on failure or if no allocator is set.
+ * Uses system default alignment (alignment = 0).
  */
 void* geomlib_malloc(size_t size);
+
+/**
+ * Allocate aligned memory through the global allocator.
+ * Returns NULL on failure or if no allocator is set.
+ * alignment = 0 means system default (equivalent to geomlib_malloc).
+ * alignment must be a power of two when non-zero.
+ */
+void* geomlib_aligned_malloc(size_t size, size_t alignment);
 
 /**
  * Allocate zero-initialized memory through the global allocator.

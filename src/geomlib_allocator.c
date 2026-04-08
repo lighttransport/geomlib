@@ -16,8 +16,12 @@
 
 #include <stdlib.h>
 
-static void* default_malloc(size_t size, void *user_data) {
+static void* default_malloc(size_t size, size_t alignment, void *user_data) {
     (void)user_data;
+    (void)alignment; /* stdlib malloc guarantees _Alignof(max_align_t) alignment.
+                        Over-aligned requests (alignment > _Alignof(max_align_t))
+                        are not supported by this default allocator; provide a
+                        custom allocator with aligned_alloc/posix_memalign if needed. */
     return malloc(size);
 }
 
@@ -80,7 +84,14 @@ void* geomlib_malloc(size_t size) {
     if (g_allocator == NULL || g_allocator->malloc_fn == NULL) {
         return NULL;
     }
-    return g_allocator->malloc_fn(size, g_allocator->user_data);
+    return g_allocator->malloc_fn(size, 0, g_allocator->user_data);
+}
+
+void* geomlib_aligned_malloc(size_t size, size_t alignment) {
+    if (g_allocator == NULL || g_allocator->malloc_fn == NULL) {
+        return NULL;
+    }
+    return g_allocator->malloc_fn(size, alignment, g_allocator->user_data);
 }
 
 void* geomlib_calloc(size_t count, size_t size) {
@@ -94,7 +105,7 @@ void* geomlib_calloc(size_t count, size_t size) {
         return NULL;
     }
 
-    void *ptr = g_allocator->malloc_fn(total, g_allocator->user_data);
+    void *ptr = g_allocator->malloc_fn(total, 0, g_allocator->user_data);
     if (ptr != NULL) {
         geomlib_memset(ptr, 0, total);
     }

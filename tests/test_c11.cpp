@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#include <cstddef>
 
 extern "C" {
 #include "geomlib/geomlib_allocator.h"
@@ -38,45 +39,46 @@ struct tracking_allocator_data {
     size_t current_allocated;
 };
 
-static void* tracking_malloc(size_t size, void *user_data) {
+/* Header size padded to max_align_t to preserve alignment of returned pointers */
+static const size_t TRACKING_HEADER_SIZE =
+    sizeof(size_t) < alignof(max_align_t) ? alignof(max_align_t) : sizeof(size_t);
+
+static void* tracking_malloc(size_t size, size_t alignment, void *user_data) {
     struct tracking_allocator_data *data = (struct tracking_allocator_data *)user_data;
+    (void)alignment; /* Rely on system malloc for alignment when 0 */
+    void *ptr = malloc(size + TRACKING_HEADER_SIZE);
+    if (!ptr) return NULL;
+    *(size_t*)ptr = size;
     data->alloc_count++;
     data->total_allocated += size;
     data->current_allocated += size;
-    /* Store size prefix for tracking frees */
-    void *ptr = malloc(size + sizeof(size_t));
-    if (!ptr) return NULL;
-    *(size_t*)ptr = size;
-    return (char*)ptr + sizeof(size_t);
+    return (char*)ptr + TRACKING_HEADER_SIZE;
 }
 
 static void* tracking_realloc(void *ptr, size_t new_size, void *user_data) {
     struct tracking_allocator_data *data = (struct tracking_allocator_data *)user_data;
     if (ptr == NULL) {
-        return tracking_malloc(new_size, user_data);
+        return tracking_malloc(new_size, 0, user_data);
     }
-    void *real_ptr = (char*)ptr - sizeof(size_t);
+    void *real_ptr = (char*)ptr - TRACKING_HEADER_SIZE;
     size_t old_size = *(size_t*)real_ptr;
+    void *new_ptr = realloc(real_ptr, new_size + TRACKING_HEADER_SIZE);
+    if (!new_ptr) {
+        return NULL;
+    }
     data->current_allocated -= old_size;
     data->current_allocated += new_size;
     data->total_allocated += new_size;
-    void *new_ptr = realloc(real_ptr, new_size + sizeof(size_t));
-    if (!new_ptr) {
-        data->current_allocated += old_size;
-        data->current_allocated -= new_size;
-        data->total_allocated -= new_size;
-        return NULL;
-    }
     *(size_t*)new_ptr = new_size;
-    return (char*)new_ptr + sizeof(size_t);
+    return (char*)new_ptr + TRACKING_HEADER_SIZE;
 }
 
 static void tracking_free(void *ptr, void *user_data) {
     struct tracking_allocator_data *data = (struct tracking_allocator_data *)user_data;
     if (ptr == NULL) return;
-    data->free_count++;
-    void *real_ptr = (char*)ptr - sizeof(size_t);
+    void *real_ptr = (char*)ptr - TRACKING_HEADER_SIZE;
     size_t size = *(size_t*)real_ptr;
+    data->free_count++;
     data->current_allocated -= size;
     free(real_ptr);
 }
@@ -211,6 +213,7 @@ static void test_custom_allocator_with_mesh(void) {
     test(data.alloc_count > 0, "custom allocator was called for trimesh_init");
 
     size_t allocs_after_init = data.alloc_count;
+    test(allocs_after_init > 0, "trimesh_init made allocations");
 
     /* Add some vertices */
     geomlib_vec3 v = {1.0f, 2.0f, 3.0f};
