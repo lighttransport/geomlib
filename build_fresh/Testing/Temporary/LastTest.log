@@ -1,0 +1,623 @@
+Start testing: Apr 08 20:04 UTC
+----------------------------------------------------------
+1/14 Testing: test_linalg
+1/14 Test: test_linalg
+Command: "/home/runner/work/geomlib/geomlib/build_fresh/tests/test_linalg"
+Directory: /home/runner/work/geomlib/geomlib/build_fresh/tests
+"test_linalg" start time: Apr 08 20:04 UTC
+Output:
+----------------------------------------------------------
+=== Linear Algebra Tests ===
+
+[PASS] vec2_create
+[PASS] vec2_add
+[PASS] vec2_sub
+[PASS] vec2_mul
+[PASS] vec2_dot
+[PASS] vec2_length
+[PASS] vec2_normalize
+[PASS] vec3_create
+[PASS] vec3_add
+[PASS] vec3_dot
+[PASS] vec3_cross
+[PASS] vec3_lerp
+[PASS] vec4_dot
+[PASS] vec4_length
+[PASS] mat3_identity
+[PASS] mat3_mul_identity
+[PASS] mat3_mul_vec3_identity
+[PASS] mat3_determinant_identity
+[PASS] mat3_inverse_identity
+[PASS] mat4_identity
+[PASS] mat4_translate
+[PASS] mat4_scale
+[PASS] mat4_determinant_identity
+[PASS] mat4_inverse_identity
+[PASS] mat4_rotate_x_zero
+[PASS] mat4_inverse_product_is_identity
+
+=== Results: 26/26 tests passed ===
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_linalg" end time: Apr 08 20:04 UTC
+"test_linalg" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/14 Testing: test_linalg_extended
+2/14 Test: test_linalg_extended
+Command: "/home/runner/work/geomlib/geomlib/build_fresh/tests/test_linalg_extended"
+Directory: /home/runner/work/geomlib/geomlib/build_fresh/tests
+"test_linalg_extended" start time: Apr 08 20:04 UTC
+Output:
+----------------------------------------------------------
+=== Extended Linear Algebra Tests ===
+
+[PASS] vec2d_add
+[PASS] vec2d_length
+[PASS] vec2d_normalize
+[PASS] vec3_zero_length
+[PASS] vec3_parallel_cross_zero
+[PASS] vec4_add
+[PASS] vec4_mul
+[PASS] vec4_dot
+[PASS] mat4_scale_xyz
+[PASS] mat4_inverse_succeeds
+[PASS] vec3_lerp_t0
+[PASS] vec3_lerp_t1
+[PASS] vec3_lerp_t05
+
+=== Results: 13/13 tests passed ===
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_linalg_extended" end time: Apr 08 20:04 UTC
+"test_linalg_extended" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/14 Testing: test_solver
+3/14 Test: test_solver
+Command: "/home/runner/work/geomlib/geomlib/build_fresh/tests/test_solver"
+Directory: /home/runner/work/geomlib/geomlib/build_fresh/tests
+"test_solver" start time: Apr 08 20:04 UTC
+Output:
+----------------------------------------------------------
+=== Solver Tests ===
+
+[PASS] gauss_2x2_success
+[PASS] gauss_2x2_solution
+[PASS] gauss_3x3_success
+[PASS] gauss_3x3_solution
+[PASS] gauss_singular
+[PASS] lu_decompose_success
+[PASS] lu_solve_decompose
+[PASS] lu_solve_success
+[PASS] lu_solve_solution
+[PASS] cg_spd_success
+[PASS] cg_spd_solution
+[PASS] jacobi_success
+[PASS] jacobi_solution
+[PASS] power_iteration_success
+[PASS] power_iteration_eigenvalue
+[PASS] least_squares_success
+[PASS] least_squares_slope
+[PASS] gauss_double_success
+[PASS] gauss_double_solution
+
+=== Results: 19/19 tests passed ===
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_solver" end time: Apr 08 20:04 UTC
+"test_solver" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/14 Testing: test_mesh
+4/14 Test: test_mesh
+Command: "/home/runner/work/geomlib/geomlib/build_fresh/tests/test_mesh"
+Directory: /home/runner/work/geomlib/geomlib/build_fresh/tests
+"test_mesh" start time: Apr 08 20:04 UTC
+Output:
+----------------------------------------------------------
+=== Mesh Tests ===
+
+[PASS] polygon2d_init
+[PASS] polygon2d_vertex_count
+[PASS] polygon2d_area_unit_square
+[PASS] polygon2d_perimeter_unit_square
+[PASS] polygon2d_centroid
+[PASS] polygon2d_is_convex_square
+[PASS] polygon2d_contains_inside
+[PASS] polygon2d_contains_outside
+[PASS] polygon3d_init
+[PASS] polygon3d_area_unit_square
+[PASS] polygon3d_normal
+[PASS] trimesh_init
+[PASS] trimesh_init_vertex_count
+[PASS] trimesh_init_triangle_count
+[PASS] trimesh_add_vertices
+[PASS] trimesh_add_triangle
+[PASS] trimesh_triangle_area
+[PASS] trimesh_triangle_normal
+[PASS] trimesh_compute_normals
+[PASS] trimesh_normals_allocated
+[PASS] trimesh_normal_direction
+[PASS] trimesh_normal_direction
+[PASS] trimesh_normal_direction
+[PASS] trimesh_aabb_min
+[PASS] trimesh_aabb_max
+[PASS] aabb_contains_point_inside
+[PASS] aabb_contains_point_outside
+[PASS] aabb_center
+[PASS] aabb_size
+[PASS] aabb_volume
+[PASS] aabb_surface_area
+[PASS] aabb_intersects_true
+[PASS] aabb_intersects_false
+[PASS] create_box_success
+[PASS] create_box_vertex_count
+[PASS] create_box_triangle_count
+[PASS] create_box_surface_area
+[PASS] create_sphere_success
+[PASS] create_sphere_has_vertices
+[PASS] create_sphere_has_triangles
+[PASS] create_sphere_surface_area
+[PASS] create_cylinder_success
+[PASS] create_cylinder_has_vertices
+[PASS] create_cylinder_has_triangles
+[PASS] create_plane_success
+[PASS] create_plane_vertex_count
+[PASS] create_plane_triangle_count
+[PASS] create_plane_surface_area
+[PASS] polymesh_triangulate_success
+[PASS] polymesh_triangulate_vertex_count
+[PASS] polymesh_triangulate_triangle_count
+
+=== Results: 51/51 tests passed ===
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_mesh" end time: Apr 08 20:04 UTC
+"test_mesh" time elapsed: 00:00:00
+----------------------------------------------------------
+
+5/14 Testing: test_mesh_extended
+5/14 Test: test_mesh_extended
+Command: "/home/runner/work/geomlib/geomlib/build_fresh/tests/test_mesh_extended"
+Directory: /home/runner/work/geomlib/geomlib/build_fresh/tests
+"test_mesh_extended" start time: Apr 08 20:04 UTC
+Output:
+----------------------------------------------------------
+=== Extended Mesh Tests ===
+
+[PASS] degenerate_triangle_zero_area
+[PASS] zero_length_edge_triangle
+[PASS] unit_cube_volume
+[PASS] 2x2x2_cube_volume
+[PASS] unit_sphere_volume
+[PASS] triangle_centroid
+[PASS] box_centroid
+[PASS] initial_vertex_capacity
+[PASS] initial_triangle_capacity
+[PASS] reserve_vertices_expands
+[PASS] reserve_triangles_expands
+[PASS] mesh_has_data
+[PASS] mesh_cleared
+[PASS] mesh_reusable_after_clear
+[PASS] triangle_vertex_0
+[PASS] triangle_vertex_1
+[PASS] triangle_vertex_2
+[PASS] large_coordinate_triangle_area
+[PASS] small_coordinate_triangle_area
+[PASS] aabb_merge_x
+[PASS] aabb_merge_y
+[PASS] aabb_merge_z
+[PASS] aabb_expand_point
+[PASS] aabb_closest_point_inside
+[PASS] aabb_closest_point_outside_x
+[PASS] aabb_closest_point_corner
+[PASS] aabb_closest_point_below_min
+[PASS] aabb_empty_inverted
+[PASS] aabb_empty_expand_to_point
+[PASS] polygon2d_triangle_area
+[PASS] polygon2d_triangle_is_convex
+[PASS] polygon2d_contains_vertex
+[PASS] large_mesh_vertex_count
+[PASS] large_mesh_triangle_count
+[PASS] large_mesh_aabb_centered
+[PASS] large_mesh_surface_area
+[PASS] low_res_sphere
+[PASS] flat_cylinder
+[PASS] plane_subdivision_vertices
+[PASS] plane_subdivision_triangles
+
+=== Results: 40/40 tests passed ===
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_mesh_extended" end time: Apr 08 20:04 UTC
+"test_mesh_extended" time elapsed: 00:00:00
+----------------------------------------------------------
+
+6/14 Testing: test_random
+6/14 Test: test_random
+Command: "/home/runner/work/geomlib/geomlib/build_fresh/tests/test_random"
+Directory: /home/runner/work/geomlib/geomlib/build_fresh/tests
+"test_random" start time: Apr 08 20:04 UTC
+Output:
+----------------------------------------------------------
+========================================
+geomlib Random Number Generation Tests
+========================================
+
+Testing PCG32 initialization...
+  ✓ Initialization successful
+Testing PCG32 deterministic behavior...
+  ✓ Same seed produces identical sequences
+Testing PCG32 with different seeds...
+  ✓ Different seeds produce different sequences (100/100 different)
+Testing PCG32 with different sequence numbers...
+  ✓ Different sequences produce different values (100/100 different)
+Testing PCG32 float generation...
+  ✓ All 10000 values in [0, 1), mean = 0.5000
+Testing PCG32 double generation...
+  ✓ All 10000 values in [0, 1), mean = 0.500001
+Testing PCG32 integer range...
+  ✓ All values in [-10, 10] generated with reasonable distribution
+Testing PCG32 float range...
+  ✓ All values in [-5.0, 5.0), mean = 0.0000
+Testing PCG32 double range...
+  ✓ All values in [-100.0, 100.0), mean = 0.0001
+Testing PCG32 against known sequence...
+  ✓ Generated sequence: 2707161783, 2068313097, 3122475824, 2211639955, 3215226955
+Testing PCG32 edge cases...
+  ✓ Edge cases handled correctly
+
+========================================
+All PCG32 tests passed!
+========================================
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_random" end time: Apr 08 20:04 UTC
+"test_random" time elapsed: 00:00:00
+----------------------------------------------------------
+
+7/14 Testing: test_montecarlo
+7/14 Test: test_montecarlo
+Command: "/home/runner/work/geomlib/geomlib/build_fresh/tests/test_montecarlo"
+Directory: /home/runner/work/geomlib/geomlib/build_fresh/tests
+"test_montecarlo" start time: Apr 08 20:04 UTC
+Output:
+----------------------------------------------------------
+================================================
+geomlib Monte Carlo Geometry Processing Tests
+================================================
+
+Testing uniform triangle sampling...
+  ✓ Uniform sampling produces correct distribution (centroid: 0.3354, 0.3339, 0.0000)
+Testing triangle sampling with barycentric coordinates...
+  ✓ Barycentric coordinates valid (0.4462, 0.1378, 0.4160 sum=1.0000)
+Testing triangle sampling PDF...
+  ✓ PDF correct: 2.0000 (expected 2.0000)
+Testing mesh sampling distribution...
+  ✓ Distribution built correctly (total_area=0.0000)
+Testing mesh surface sampling...
+  ✓ Mesh sampling produces uniform distribution (centroid: 0.4990, 0.5000)
+Testing Monte Carlo integration...
+  ✓ Monte Carlo integration estimate: 3.14052 (expected 3.14159, error 0.00107)
+Testing closest point on triangle...
+  ✓ Closest point queries work correctly
+Testing sphere surface sampling...
+  ✓ Uniform sphere sampling correct (centroid near origin: -0.0066, -0.0062, 0.0007)
+Testing sphere volume sampling...
+  ✓ All 10000 samples inside unit sphere
+Testing hemisphere sampling...
+  ✓ Hemisphere sampling correct (1000/1000 above plane)
+Testing cosine-weighted hemisphere sampling...
+  ✓ Cosine hemisphere sampling correct (avg cos = 0.6656, expected ≈0.67)
+
+================================================
+All Monte Carlo tests passed!
+================================================
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"test_montecarlo" end time: Apr 08 20:04 UTC
+"test_montecarlo" time elapsed: 00:00:00
+----------------------------------------------------------
+
+8/14 Testing: test_bvh
+8/14 Test: test_bvh
+Command: "/home/runner/work/geomlib/geomlib/build_fresh/tests/test_bvh"
+Directory: /home/runner/work/geomlib/geomlib/build_fresh/tests
+"test_bvh" start time: Apr 08 20:04 UTC
+Output:
+----------------------------------------------------------
+=============================================
+geomlib BVH and Ray Tracing Tests
+=============================================
+
+Testing ray creation...
+  ✓ Ray creation correct
+Testing ray evaluation...
+  ✓ Ray evaluation correct
+Testing ray-triangle intersection...
+  ✓ Ray-triangle intersection works
+Testing ray-AABB intersection...
+  ✓ Ray-AABB intersection works
+Testing BVH construction...
+  ✓ BVH construction successful (depth=4, leaves=5, avg_leaf_size=2.40)
+Testing BVH ray tracing...
+  ✓ BVH ray tracing hit at t=4.0000, pos=(0.00, 0.00, 1.00)
+  ✓ BVH ray tracing correctly misses
+Testing BVH occlusion queries...
+  ✓ Occlusion queries work correctly
+Testing BVH closest point query...
+  ✓ Closest point query found point at distance 4.0000
+  ✓ Closest point query works for interior points
+Testing BVH radius query...
+  ✓ Radius query found 11 points within radius 3.00
+  ✓ Small radius query found 0 points
+Testing multiple rays through BVH...
+  ✓ Multiple rays: 37/100 hit sphere
+Testing BVH performance...
+  Mesh has 4096 triangles
+  ✓ Cast 10000 rays, 10000 hits (100.0% hit rate)
+
+=============================================
+All BVH tests passed!
+=============================================
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"test_bvh" end time: Apr 08 20:04 UTC
+"test_bvh" time elapsed: 00:00:00
+----------------------------------------------------------
+
+9/14 Testing: test_bvh_extended
+9/14 Test: test_bvh_extended
+Command: "/home/runner/work/geomlib/geomlib/build_fresh/tests/test_bvh_extended"
+Directory: /home/runner/work/geomlib/geomlib/build_fresh/tests
+"test_bvh_extended" start time: Apr 08 20:04 UTC
+Output:
+----------------------------------------------------------
+=== Extended BVH Tests ===
+
+[PASS] single_triangle_bvh_build
+[PASS] single_triangle_bvh_ray_hit
+[PASS] ray_miss_no_intersection
+[PASS] bvh_all_quality_levels_build
+[PASS] bvh_stats_has_leaves
+[PASS] bvh_stats_has_depth
+[PASS] bvh_stats_avg_leaf_size
+[PASS] large_mesh_created
+[PASS] large_mesh_bvh_build
+[PASS] large_mesh_bvh_has_depth
+[PASS] large_mesh_bvh_ray_intersection
+
+=== Results: 11/11 tests passed ===
+<end of output>
+Test time =   0.01 sec
+----------------------------------------------------------
+Test Passed.
+"test_bvh_extended" end time: Apr 08 20:04 UTC
+"test_bvh_extended" time elapsed: 00:00:00
+----------------------------------------------------------
+
+10/14 Testing: test_integration
+10/14 Test: test_integration
+Command: "/home/runner/work/geomlib/geomlib/build_fresh/tests/test_integration"
+Directory: /home/runner/work/geomlib/geomlib/build_fresh/tests
+"test_integration" start time: Apr 08 20:04 UTC
+Output:
+----------------------------------------------------------
+=== Integration Tests ===
+
+[PASS] mesh_montecarlo_build_distribution
+[PASS] sampled_point_on_sphere_surface
+[PASS] raytrace_box_hit
+[PASS] raytrace_sphere_hit
+[PASS] random_montecarlo_consistent_samples
+[PASS] mesh_exact_surface_area
+[PASS] montecarlo_area_matches_exact
+[PASS] linalg_mesh_scaled_area
+[PASS] linalg_mesh_scaled_volume
+[PASS] aabb_sphere_bounds_x
+[PASS] aabb_contains_centroid
+[PASS] pipeline_mesh_created
+[PASS] pipeline_bvh_built
+[PASS] pipeline_sampling_setup
+[PASS] pipeline_ray_hits
+[PASS] polygon_triangulation
+[PASS] polygon_mesh_bvh_build
+[PASS] polygon_mesh_bvh_ray_hit
+
+=== Results: 18/18 tests passed ===
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_integration" end time: Apr 08 20:04 UTC
+"test_integration" time elapsed: 00:00:00
+----------------------------------------------------------
+
+11/14 Testing: test_collision
+11/14 Test: test_collision
+Command: "/home/runner/work/geomlib/geomlib/build_fresh/tests/test_collision"
+Directory: /home/runner/work/geomlib/geomlib/build_fresh/tests
+"test_collision" start time: Apr 08 20:04 UTC
+Output:
+----------------------------------------------------------
+=== Collision Detection and Mesh Reduction Tests ===
+
+[PASS] obb_computation_succeeds
+[PASS] obb_volume_reasonable
+[PASS] obb_center_at_origin
+[PASS] obb_contains_inside_point
+[PASS] obb_excludes_outside_point
+[PASS] obb_sphere_succeeds
+[PASS] obb_sphere_roughly_cubic
+[PASS] convex_hull_generation_succeeds
+[PASS] convex_hull_has_geometry
+[PASS] convex_hull_encloses_x
+[PASS] convex_hull_encloses_y
+[PASS] box_is_convex
+[PASS] mesh_has_triangles
+[PASS] mesh_simplification_succeeds
+[PASS] mesh_triangle_count_reduced
+[PASS] mesh_has_minimum_triangles
+[PASS] mesh_simplification_target_succeeds
+[PASS] mesh_close_to_target_count
+[PASS] proxy_convex_hull_succeeds
+[PASS] proxy_has_triangles
+[PASS] proxy_simplified_succeeds
+[PASS] proxy_simplified_count_reasonable
+[PASS] proxy_obb_succeeds
+[PASS] proxy_obb_is_box
+[PASS] proxy_aabb_succeeds
+[PASS] proxy_aabb_is_box
+[PASS] box_proxy_aabb_succeeds
+[PASS] box_proxy_aabb_count
+[PASS] box_proxy_obb_succeeds
+[PASS] box_proxy_obb_count
+[PASS] mesh_quality_analysis_succeeds
+[PASS] quality_min_edge_positive
+[PASS] quality_max_ge_min
+[PASS] quality_avg_edge_positive
+[PASS] quality_no_degenerates
+[PASS] collision_cost_positive_simple
+[PASS] collision_cost_complex_higher
+[PASS] aabb_proxy_cheaper_than_original
+[PASS] simplified_proxy_cheaper_than_original
+[PASS] obb_fails_on_empty_mesh
+[PASS] convex_hull_fails_on_empty_mesh
+
+=== Results: 41/41 tests passed ===
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_collision" end time: Apr 08 20:04 UTC
+"test_collision" time elapsed: 00:00:00
+----------------------------------------------------------
+
+12/14 Testing: test_advanced_features
+12/14 Test: test_advanced_features
+Command: "/home/runner/work/geomlib/geomlib/build_fresh/tests/test_advanced_features"
+Directory: /home/runner/work/geomlib/geomlib/build_fresh/tests
+"test_advanced_features" start time: Apr 08 20:04 UTC
+Output:
+----------------------------------------------------------
+=== Advanced Features Test Suite ===
+
+Testing advancing front triangulation...
+  PASS
+Testing Marching Cubes...
+  Generated 1110 vertices, 370 triangles
+  PASS
+Testing BVH-accelerated self-intersection detection...
+  Found 1 intersection pairs
+  PASS
+Testing nonmanifold vertex splitting...
+  Split 1 nonmanifold vertices
+  Vertices before: 5, after: 6
+  PASS
+Testing surface reconstruction (ball pivoting & alpha shape)...
+  Ball pivoting: 2 triangles
+  Alpha shape: 32 triangles
+  PASS
+Testing SDF operations (smoothing, blending, I/O)...
+  PASS
+
+=== ALL TESTS PASSED ===
+<end of output>
+Test time =   0.15 sec
+----------------------------------------------------------
+Test Passed.
+"test_advanced_features" end time: Apr 08 20:04 UTC
+"test_advanced_features" time elapsed: 00:00:00
+----------------------------------------------------------
+
+13/14 Testing: test_optimize
+13/14 Test: test_optimize
+Command: "/home/runner/work/geomlib/geomlib/build_fresh/tests/test_optimize"
+Directory: /home/runner/work/geomlib/geomlib/build_fresh/tests
+"test_optimize" start time: Apr 08 20:04 UTC
+Output:
+----------------------------------------------------------
+=== Mesh Optimization Tests ===
+
+Testing triangle strip generation...
+  Generated 1 strip(s)
+  Strip 0: 4 indices (2 triangles)
+  PASS
+Testing index compression...
+  Original size: 48 bytes
+  Compressed size: 12 bytes
+  Compression ratio: 25.00%
+  PASS
+Testing compression on sphere mesh...
+  Sphere: 289 vertices, 512 triangles
+  Original size: 6144 bytes
+  Compressed size: 1536 bytes
+  Compression ratio: 25.00%
+  PASS
+Testing triangle strips on sphere...
+  Sphere: 128 triangles
+  Generated 8 strip(s)
+  Original indices: 384
+  Strip indices: 144
+  Savings: 62.50%
+  PASS
+
+=== ALL TESTS PASSED ===
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_optimize" end time: Apr 08 20:04 UTC
+"test_optimize" time elapsed: 00:00:00
+----------------------------------------------------------
+
+14/14 Testing: test_cfd
+14/14 Test: test_cfd
+Command: "/home/runner/work/geomlib/geomlib/build_fresh/tests/test_cfd"
+Directory: /home/runner/work/geomlib/geomlib/build_fresh/tests
+"test_cfd" start time: Apr 08 20:04 UTC
+Output:
+----------------------------------------------------------
+=== CFD Operators Test Suite ===
+
+Testing divergence operator...
+  Mesh: 81 vertices, 128 triangles
+  Average divergence: -0.9208
+  PASS
+Testing curl operator...
+  Average curl Z component: 0.0000
+  PASS
+Testing Laplacian operator...
+  Average Laplacian: -0.0000 (expected ~6.0)
+  PASS
+Testing vector field interpolation...
+  Interpolated at (0.5, 0.5, 0): (0.50, 0.50, 0.00)
+  PASS
+
+=== ALL TESTS PASSED ===
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"test_cfd" end time: Apr 08 20:04 UTC
+"test_cfd" time elapsed: 00:00:00
+----------------------------------------------------------
+
+End testing: Apr 08 20:04 UTC

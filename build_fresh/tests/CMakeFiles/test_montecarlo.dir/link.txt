@@ -1,0 +1,1 @@
+/usr/bin/c++  -fno-rtti -fno-exceptions -Wl,--dependency-file=CMakeFiles/test_montecarlo.dir/link.d CMakeFiles/test_montecarlo.dir/test_montecarlo.cpp.o -o test_montecarlo  ../libgeomlib.a -lm
