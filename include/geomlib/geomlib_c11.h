@@ -60,6 +60,30 @@ int   geomlib_memcmp(const void *s1, const void *s2, size_t n);
 #endif /* GEOMLIB_FREESTANDING */
 
 /* ==========================================================================
+ * Freestanding stdlib utilities (qsort, abs)
+ *
+ * In freestanding mode, these provide portable implementations.
+ * In hosted mode, they map to standard library functions.
+ * ========================================================================== */
+
+#ifdef GEOMLIB_FREESTANDING
+
+/** Portable qsort implementation (Shell sort) for freestanding environments. */
+void geomlib_qsort(void *base, size_t nmemb, size_t size,
+                   int (*compar)(const void *, const void *));
+
+/** Portable abs for freestanding environments. */
+static inline int geomlib_abs(int x) { return x < 0 ? -x : x; }
+
+#else /* Hosted mode */
+
+#include <stdlib.h>
+#define geomlib_qsort  qsort
+#define geomlib_abs    abs
+
+#endif /* GEOMLIB_FREESTANDING */
+
+/* ==========================================================================
  * Freestanding math macros
  *
  * In freestanding mode, math functions are mapped to compiler builtins

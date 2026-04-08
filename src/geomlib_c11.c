@@ -71,6 +71,55 @@ int geomlib_memcmp(const void *s1, const void *s2, size_t n) {
 #endif /* GEOMLIB_FREESTANDING */
 
 /* ==========================================================================
+ * Freestanding qsort (Shell sort implementation)
+ * ========================================================================== */
+
+#ifdef GEOMLIB_FREESTANDING
+
+void geomlib_qsort(void *base, size_t nmemb, size_t size,
+                   int (*compar)(const void *, const void *)) {
+    if (base == NULL || nmemb <= 1 || size == 0 || compar == NULL) {
+        return;
+    }
+
+    unsigned char *arr = (unsigned char *)base;
+
+    /* Shell sort with Knuth's gap sequence: gap = gap*3+1 */
+    size_t gap = 1;
+    while (gap < nmemb / 3) {
+        gap = gap * 3 + 1;
+    }
+
+    /* Temporary buffer on stack for swapping (use small fixed buffer + loop) */
+    unsigned char tmp[256];
+
+    while (gap >= 1) {
+        for (size_t i = gap; i < nmemb; i++) {
+            size_t j = i;
+            while (j >= gap &&
+                   compar(arr + j * size, arr + (j - gap) * size) < 0) {
+                /* Swap arr[j] and arr[j-gap] */
+                size_t remaining = size;
+                size_t offset = 0;
+                while (remaining > 0) {
+                    size_t chunk = remaining < sizeof(tmp) ? remaining : sizeof(tmp);
+                    geomlib_memcpy(tmp, arr + j * size + offset, chunk);
+                    geomlib_memcpy(arr + j * size + offset,
+                                   arr + (j - gap) * size + offset, chunk);
+                    geomlib_memcpy(arr + (j - gap) * size + offset, tmp, chunk);
+                    offset += chunk;
+                    remaining -= chunk;
+                }
+                j -= gap;
+            }
+        }
+        gap /= 3;
+    }
+}
+
+#endif /* GEOMLIB_FREESTANDING */
+
+/* ==========================================================================
  * RAII cleanup functions
  * ========================================================================== */
 

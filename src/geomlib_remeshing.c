@@ -5,9 +5,6 @@
 
 #include "geomlib/geomlib_allocator.h"
 #include "geomlib/geomlib_c11.h"
-#ifndef GEOMLIB_FREESTANDING
-#include <stdlib.h> /* qsort, abs */
-#endif
 #include "geomlib/geomlib_remeshing.h"
 #include "geomlib/geomlib_healing.h"
 #include <stdbool.h>
@@ -172,9 +169,9 @@ static bool should_flip_edge(
     int val3 = get_vertex_valence(hemesh, v3);
 
     /* Target valence is 6 for interior vertices */
-    int dev_before = abs(val0 - 6) + abs(val1 - 6) + abs(val2 - 6) + abs(val3 - 6);
-    int dev_after = abs(val0 - 1 - 6) + abs(val1 - 1 - 6) +
-                    abs(val2 + 1 - 6) + abs(val3 + 1 - 6);
+    int dev_before = geomlib_abs(val0 - 6) + geomlib_abs(val1 - 6) + geomlib_abs(val2 - 6) + geomlib_abs(val3 - 6);
+    int dev_after = geomlib_abs(val0 - 1 - 6) + geomlib_abs(val1 - 1 - 6) +
+                    geomlib_abs(val2 + 1 - 6) + geomlib_abs(val3 + 1 - 6);
 
     return dev_after < dev_before;
 }

@@ -5,9 +5,6 @@
 
 #include "geomlib/geomlib_allocator.h"
 #include "geomlib/geomlib_c11.h"
-#ifndef GEOMLIB_FREESTANDING
-#include <stdlib.h> /* qsort, abs */
-#endif
 #include "geomlib/geomlib_healing.h"
 #include "geomlib/geomlib_holefill.h"
 #include "geomlib/geomlib_random.h"
@@ -139,7 +136,7 @@ int geomlib_halfedge_build(
         edges[i].he_idx = (uint32_t)i;
     }
 
-    qsort(edges, he_count, sizeof(EdgeKey), compare_edges);
+    geomlib_qsort(edges, he_count, sizeof(EdgeKey), compare_edges);
 
     // Match twin half-edges
     for (size_t i = 0; i < he_count; i++) {

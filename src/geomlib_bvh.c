@@ -7,9 +7,6 @@
 
 #include "geomlib/geomlib_allocator.h"
 #include "geomlib/geomlib_c11.h"
-#ifndef GEOMLIB_FREESTANDING
-#include <stdlib.h> /* qsort, abs */
-#endif
 #include "geomlib/geomlib_bvh.h"
 #include "geomlib/geomlib_montecarlo.h"
 #include <float.h>
@@ -364,11 +361,11 @@ static uint32_t build_bvh_recursive(
     } else {
         /* Median split (fast) */
         if (split_axis == 0) {
-            qsort(primitives + start, prim_count, sizeof(bvh_primitive_info), compare_primitive_x);
+            geomlib_qsort(primitives + start, prim_count, sizeof(bvh_primitive_info), compare_primitive_x);
         } else if (split_axis == 1) {
-            qsort(primitives + start, prim_count, sizeof(bvh_primitive_info), compare_primitive_y);
+            geomlib_qsort(primitives + start, prim_count, sizeof(bvh_primitive_info), compare_primitive_y);
         } else {
-            qsort(primitives + start, prim_count, sizeof(bvh_primitive_info), compare_primitive_z);
+            geomlib_qsort(primitives + start, prim_count, sizeof(bvh_primitive_info), compare_primitive_z);
         }
     }
 
