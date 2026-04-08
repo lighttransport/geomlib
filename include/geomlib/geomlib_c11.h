@@ -266,10 +266,10 @@ static inline int geomlib_abs(int x) { return x < 0 ? -x : x; }
 #define geomlib_round  round
 
 #ifndef GEOMLIB_PI
-  #define GEOMLIB_PI   M_PI
+  #define GEOMLIB_PI   3.14159265358979323846
 #endif
 #ifndef GEOMLIB_PIf
-  #define GEOMLIB_PIf  ((float)M_PI)
+  #define GEOMLIB_PIf  3.14159265358979323846f
 #endif
 
 #endif /* GEOMLIB_FREESTANDING */
