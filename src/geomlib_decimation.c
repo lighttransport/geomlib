@@ -3,11 +3,10 @@
  * Simplified version of Garland-Heckbert algorithm
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_decimation.h"
 #include "geomlib/geomlib_healing.h"
-#include <stdlib.h>
-#include <string.h>
-#include <math.h>
 #include <float.h>
 
 /* Create default decimation parameters */
@@ -104,7 +103,7 @@ int geomlib_decimate_qem(
     if (result != GEOMLIB_MESH_SUCCESS) return result;
 
     /* Compute quadric for each vertex */
-    geomlib_quadric *vertex_quadrics = calloc(mesh->vertex_count, sizeof(geomlib_quadric));
+    geomlib_quadric *vertex_quadrics = geomlib_calloc(mesh->vertex_count, sizeof(geomlib_quadric));
     if (!vertex_quadrics) {
         geomlib_halfedge_free(&hemesh);
         return GEOMLIB_MESH_ERROR_MEMORY;
@@ -142,7 +141,7 @@ int geomlib_decimate_qem(
 
     /* Mark vertices to keep (simple greedy approach) */
     /* In a full implementation, we'd use a priority queue of edge collapses */
-    bool *vertex_removed = calloc(mesh->vertex_count, sizeof(bool));
+    bool *vertex_removed = geomlib_calloc(mesh->vertex_count, sizeof(bool));
     size_t removed_count = 0;
     size_t vertices_to_remove = mesh->vertex_count - target_verts;
 
@@ -199,7 +198,7 @@ int geomlib_decimate_qem(
     }
 
     /* Build new mesh without removed vertices */
-    uint32_t *vertex_map = malloc(mesh->vertex_count * sizeof(uint32_t));
+    uint32_t *vertex_map = geomlib_malloc(mesh->vertex_count * sizeof(uint32_t));
     uint32_t new_vertex_count = 0;
 
     for (size_t v = 0; v < mesh->vertex_count; v++) {
@@ -211,7 +210,7 @@ int geomlib_decimate_qem(
     }
 
     /* Create new vertex array */
-    geomlib_vec3 *new_vertices = malloc(new_vertex_count * sizeof(geomlib_vec3));
+    geomlib_vec3 *new_vertices = geomlib_malloc(new_vertex_count * sizeof(geomlib_vec3));
     for (size_t v = 0; v < mesh->vertex_count; v++) {
         if (!vertex_removed[v]) {
             new_vertices[vertex_map[v]] = mesh->vertices[v];
@@ -219,7 +218,7 @@ int geomlib_decimate_qem(
     }
 
     /* Create new triangle array (skip triangles with removed vertices) */
-    uint32_t *new_indices = malloc(mesh->triangle_count * 3 * sizeof(uint32_t));
+    uint32_t *new_indices = geomlib_malloc(mesh->triangle_count * 3 * sizeof(uint32_t));
     size_t new_triangle_count = 0;
 
     for (size_t t = 0; t < mesh->triangle_count; t++) {
@@ -240,10 +239,10 @@ int geomlib_decimate_qem(
     }
 
     /* Update mesh */
-    free(mesh->vertices);
-    free(mesh->indices);
+    geomlib_free(mesh->vertices);
+    geomlib_free(mesh->indices);
     if (mesh->normals) {
-        free(mesh->normals);
+        geomlib_free(mesh->normals);
         mesh->normals = NULL;
     }
 
@@ -257,9 +256,9 @@ int geomlib_decimate_qem(
     mesh->triangle_capacity = new_triangle_count;
 
     /* Cleanup */
-    free(vertex_quadrics);
-    free(vertex_removed);
-    free(vertex_map);
+    geomlib_free(vertex_quadrics);
+    geomlib_free(vertex_removed);
+    geomlib_free(vertex_map);
     geomlib_halfedge_free(&hemesh);
 
     /* Finalize statistics */

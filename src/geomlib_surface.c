@@ -3,12 +3,11 @@
  * MIT License - Copyright (c) 2025 Light Transport Entertainment, Inc.
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_surface.h"
 #include "geomlib/geomlib_random.h"
-#include <stdlib.h>
-#include <string.h>
 #include <float.h>
-#include <math.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -32,7 +31,7 @@ static inline float vec3_distance(geomlib_vec3 a, geomlib_vec3 b) {
 int geomlib_pointcloud_init(geomlib_pointcloud *pc, size_t initial_capacity) {
     if (!pc) return GEOMLIB_MESH_ERROR_INVALID;
 
-    pc->points = (geomlib_vec3*)malloc(initial_capacity * sizeof(geomlib_vec3));
+    pc->points = (geomlib_vec3*)geomlib_malloc(initial_capacity * sizeof(geomlib_vec3));
     if (!pc->points) return GEOMLIB_MESH_ERROR_MEMORY;
 
     pc->normals = NULL;
@@ -46,9 +45,9 @@ int geomlib_pointcloud_init(geomlib_pointcloud *pc, size_t initial_capacity) {
 void geomlib_pointcloud_free(geomlib_pointcloud *pc) {
     if (!pc) return;
 
-    free(pc->points);
-    free(pc->normals);
-    free(pc->confidences);
+    geomlib_free(pc->points);
+    geomlib_free(pc->normals);
+    geomlib_free(pc->confidences);
 
     pc->points = NULL;
     pc->normals = NULL;
@@ -68,18 +67,18 @@ size_t geomlib_pointcloud_add_point(
     // Grow if needed
     if (pc->point_count >= pc->point_capacity) {
         size_t new_capacity = pc->point_capacity * 2;
-        geomlib_vec3 *new_points = (geomlib_vec3*)realloc(pc->points, new_capacity * sizeof(geomlib_vec3));
+        geomlib_vec3 *new_points = (geomlib_vec3*)geomlib_realloc(pc->points, new_capacity * sizeof(geomlib_vec3));
         if (!new_points) return (size_t)-1;
         pc->points = new_points;
 
         if (pc->normals) {
-            geomlib_vec3 *new_normals = (geomlib_vec3*)realloc(pc->normals, new_capacity * sizeof(geomlib_vec3));
+            geomlib_vec3 *new_normals = (geomlib_vec3*)geomlib_realloc(pc->normals, new_capacity * sizeof(geomlib_vec3));
             if (!new_normals) return (size_t)-1;
             pc->normals = new_normals;
         }
 
         if (pc->confidences) {
-            float *new_conf = (float*)realloc(pc->confidences, new_capacity * sizeof(float));
+            float *new_conf = (float*)geomlib_realloc(pc->confidences, new_capacity * sizeof(float));
             if (!new_conf) return (size_t)-1;
             pc->confidences = new_conf;
         }
@@ -89,12 +88,12 @@ size_t geomlib_pointcloud_add_point(
 
     // Allocate normals/confidences on first use
     if (normal && !pc->normals) {
-        pc->normals = (geomlib_vec3*)calloc(pc->point_capacity, sizeof(geomlib_vec3));
+        pc->normals = (geomlib_vec3*)geomlib_calloc(pc->point_capacity, sizeof(geomlib_vec3));
         if (!pc->normals) return (size_t)-1;
     }
 
     if (!pc->confidences) {
-        pc->confidences = (float*)malloc(pc->point_capacity * sizeof(float));
+        pc->confidences = (float*)geomlib_malloc(pc->point_capacity * sizeof(float));
         if (!pc->confidences) return (size_t)-1;
         for (size_t i = 0; i < pc->point_capacity; i++) {
             pc->confidences[i] = 1.0f;
@@ -277,7 +276,7 @@ static int reconstruct_greedy_projection(
     // This is a simplified greedy projection
     // For production, would use better spatial indexing
 
-    ProjectionPoint *points = (ProjectionPoint*)malloc(pc->point_count * sizeof(ProjectionPoint));
+    ProjectionPoint *points = (ProjectionPoint*)geomlib_malloc(pc->point_count * sizeof(ProjectionPoint));
     if (!points) return GEOMLIB_MESH_ERROR_MEMORY;
 
     for (size_t i = 0; i < pc->point_count; i++) {
@@ -329,7 +328,7 @@ static int reconstruct_greedy_projection(
         }
     }
 
-    free(points);
+    geomlib_free(points);
 
     // Copy vertices to output mesh
     for (size_t i = 0; i < pc->point_count; i++) {
@@ -372,7 +371,7 @@ static int reconstruct_marching_cubes(
     if (nz > 64) nz = 64;
 
     // Create density field (simplified - just check if points are nearby)
-    float *field = (float*)calloc(nx * ny * nz, sizeof(float));
+    float *field = (float*)geomlib_calloc(nx * ny * nz, sizeof(float));
     if (!field) return GEOMLIB_MESH_ERROR_MEMORY;
 
     // Fill density field
@@ -441,7 +440,7 @@ static int reconstruct_marching_cubes(
         }
     }
 
-    free(field);
+    geomlib_free(field);
 
     return GEOMLIB_MESH_SUCCESS;
 }
@@ -487,7 +486,7 @@ static int reconstruct_ball_pivoting(
     }
 
     /* Track used points */
-    bool *used = (bool*)calloc(pc->point_count, sizeof(bool));
+    bool *used = (bool*)geomlib_calloc(pc->point_count, sizeof(bool));
 
     /* Find seed triangle */
     uint32_t seed_idx = 0;
@@ -538,7 +537,7 @@ static int reconstruct_ball_pivoting(
         }
     }
 
-    free(used);
+    geomlib_free(used);
     geomlib_trimesh_free(&temp_mesh);
 
     return GEOMLIB_MESH_SUCCESS;
@@ -632,7 +631,7 @@ static int reconstruct_alpha_shape(
 
 geomlib_surface_params geomlib_surface_params_default(geomlib_surface_method method) {
     geomlib_surface_params params;
-    memset(&params, 0, sizeof(params));
+    geomlib_memset(&params, 0, sizeof(params));
 
     params.method = method;
     params.search_radius = 0.0f;  // Auto

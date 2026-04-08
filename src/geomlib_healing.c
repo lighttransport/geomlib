@@ -3,13 +3,15 @@
  * MIT License - Copyright (c) 2025 Light Transport Entertainment, Inc.
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
+#ifndef GEOMLIB_FREESTANDING
+#include <stdlib.h> /* qsort, abs */
+#endif
 #include "geomlib/geomlib_healing.h"
 #include "geomlib/geomlib_holefill.h"
 #include "geomlib/geomlib_random.h"
-#include <stdlib.h>
-#include <string.h>
 #include <float.h>
-#include <math.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -56,20 +58,20 @@ int geomlib_halfedge_build(
     if (!hemesh || !mesh) return GEOMLIB_MESH_ERROR_INVALID;
     if (mesh->triangle_count == 0) return GEOMLIB_MESH_ERROR_INVALID;
 
-    memset(hemesh, 0, sizeof(*hemesh));
+    geomlib_memset(hemesh, 0, sizeof(*hemesh));
     hemesh->mesh = mesh;
 
     // Allocate half-edges (3 per triangle)
     size_t he_count = mesh->triangle_count * 3;
-    hemesh->halfedges = (geomlib_halfedge*)malloc(he_count * sizeof(geomlib_halfedge));
+    hemesh->halfedges = (geomlib_halfedge*)geomlib_malloc(he_count * sizeof(geomlib_halfedge));
     if (!hemesh->halfedges) return GEOMLIB_MESH_ERROR_MEMORY;
 
     hemesh->halfedge_count = he_count;
     hemesh->halfedge_capacity = he_count;
 
     // Allocate vertex and face tables
-    hemesh->vertex_halfedge = (uint32_t*)malloc(mesh->vertex_count * sizeof(uint32_t));
-    hemesh->face_halfedge = (uint32_t*)malloc(mesh->triangle_count * sizeof(uint32_t));
+    hemesh->vertex_halfedge = (uint32_t*)geomlib_malloc(mesh->vertex_count * sizeof(uint32_t));
+    hemesh->face_halfedge = (uint32_t*)geomlib_malloc(mesh->triangle_count * sizeof(uint32_t));
 
     if (!hemesh->vertex_halfedge || !hemesh->face_halfedge) {
         geomlib_halfedge_free(hemesh);
@@ -119,7 +121,7 @@ int geomlib_halfedge_build(
 
     // Find twin half-edges
     // Create sorted edge list for O(n log n) twin finding
-    EdgeKey *edges = (EdgeKey*)malloc(he_count * sizeof(EdgeKey));
+    EdgeKey *edges = (EdgeKey*)geomlib_malloc(he_count * sizeof(EdgeKey));
     if (!edges) {
         geomlib_halfedge_free(hemesh);
         return GEOMLIB_MESH_ERROR_MEMORY;
@@ -155,18 +157,18 @@ int geomlib_halfedge_build(
         }
     }
 
-    free(edges);
+    geomlib_free(edges);
     return GEOMLIB_MESH_SUCCESS;
 }
 
 void geomlib_halfedge_free(geomlib_halfedge_mesh *hemesh) {
     if (!hemesh) return;
 
-    free(hemesh->halfedges);
-    free(hemesh->vertex_halfedge);
-    free(hemesh->face_halfedge);
+    geomlib_free(hemesh->halfedges);
+    geomlib_free(hemesh->vertex_halfedge);
+    geomlib_free(hemesh->face_halfedge);
 
-    memset(hemesh, 0, sizeof(*hemesh));
+    geomlib_memset(hemesh, 0, sizeof(*hemesh));
 }
 
 void geomlib_halfedge_get_stats(
@@ -300,7 +302,7 @@ geomlib_orientation_params geomlib_orientation_params_default(
     geomlib_orientation_strategy strategy
 ) {
     geomlib_orientation_params params;
-    memset(&params, 0, sizeof(params));
+    geomlib_memset(&params, 0, sizeof(params));
 
     params.strategy = strategy;
     params.ray_samples = 32;
@@ -318,14 +320,14 @@ static int fix_orientation_propagation(
 ) {
     if (!hemesh) return GEOMLIB_MESH_ERROR_INVALID;
 
-    bool *visited = (bool*)calloc(mesh->triangle_count, sizeof(bool));
-    bool *should_flip = (bool*)calloc(mesh->triangle_count, sizeof(bool));
-    uint32_t *queue = (uint32_t*)malloc(mesh->triangle_count * sizeof(uint32_t));
+    bool *visited = (bool*)geomlib_calloc(mesh->triangle_count, sizeof(bool));
+    bool *should_flip = (bool*)geomlib_calloc(mesh->triangle_count, sizeof(bool));
+    uint32_t *queue = (uint32_t*)geomlib_malloc(mesh->triangle_count * sizeof(uint32_t));
 
     if (!visited || !should_flip || !queue) {
-        free(visited);
-        free(should_flip);
-        free(queue);
+        geomlib_free(visited);
+        geomlib_free(should_flip);
+        geomlib_free(queue);
         return GEOMLIB_MESH_ERROR_MEMORY;
     }
 
@@ -391,9 +393,9 @@ static int fix_orientation_propagation(
         }
     }
 
-    free(visited);
-    free(should_flip);
-    free(queue);
+    geomlib_free(visited);
+    geomlib_free(should_flip);
+    geomlib_free(queue);
 
     return flipped_count;
 }
@@ -510,12 +512,12 @@ int geomlib_remove_duplicate_vertices(
 
     // Simple O(n²) implementation for now
     // Production would use spatial hashing
-    uint32_t *remap = (uint32_t*)malloc(mesh->vertex_count * sizeof(uint32_t));
+    uint32_t *remap = (uint32_t*)geomlib_malloc(mesh->vertex_count * sizeof(uint32_t));
     if (!remap) return GEOMLIB_MESH_ERROR_MEMORY;
 
-    bool *keep = (bool*)calloc(mesh->vertex_count, sizeof(bool));
+    bool *keep = (bool*)geomlib_calloc(mesh->vertex_count, sizeof(bool));
     if (!keep) {
-        free(remap);
+        geomlib_free(remap);
         return GEOMLIB_MESH_ERROR_MEMORY;
     }
 
@@ -550,8 +552,8 @@ int geomlib_remove_duplicate_vertices(
         mesh->indices[i] = remap[mesh->indices[i]];
     }
 
-    free(remap);
-    free(keep);
+    geomlib_free(remap);
+    geomlib_free(keep);
 
     int merged = (int)(mesh->vertex_count - unique_count);
     return merged;
@@ -632,7 +634,7 @@ int geomlib_analyze_mesh_topology(
 ) {
     if (!mesh || !issues) return GEOMLIB_MESH_ERROR_INVALID;
 
-    memset(issues, 0, sizeof(*issues));
+    geomlib_memset(issues, 0, sizeof(*issues));
 
     // Build half-edge structure for analysis
     geomlib_halfedge_mesh hemesh;

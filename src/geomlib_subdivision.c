@@ -3,11 +3,10 @@
  * Loop subdivision for triangle meshes
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_subdivision.h"
 #include "geomlib/geomlib_healing.h"
-#include <stdlib.h>
-#include <string.h>
-#include <math.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -79,12 +78,12 @@ static uint32_t edge_hash(edge_key key) {
 }
 
 static void edge_map_init(edge_map *map) {
-    memset(map->buckets, 0, sizeof(map->buckets));
+    geomlib_memset(map->buckets, 0, sizeof(map->buckets));
 }
 
 static void edge_map_put(edge_map *map, edge_key key, uint32_t new_vertex) {
     uint32_t hash = edge_hash(key);
-    edge_map_entry *entry = malloc(sizeof(edge_map_entry));
+    edge_map_entry *entry = geomlib_malloc(sizeof(edge_map_entry));
     entry->key = key;
     entry->new_vertex = new_vertex;
     entry->next = map->buckets[hash];
@@ -109,7 +108,7 @@ static void edge_map_free(edge_map *map) {
         edge_map_entry *entry = map->buckets[i];
         while (entry) {
             edge_map_entry *next = entry->next;
-            free(entry);
+            geomlib_free(entry);
             entry = next;
         }
     }

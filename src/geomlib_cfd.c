@@ -3,12 +3,11 @@
  * Gradient computation, interpolation, streamlines for CFD
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_cfd.h"
 #include "geomlib/geomlib_healing.h"
 #include "geomlib/geomlib_topology.h"
-#include <stdlib.h>
-#include <string.h>
-#include <math.h>
 #include <float.h>
 
 #ifndef M_PI
@@ -21,7 +20,7 @@
 
 geomlib_scalar_field geomlib_scalar_field_create(size_t count) {
     geomlib_scalar_field field;
-    field.values = calloc(count, sizeof(float));
+    field.values = geomlib_calloc(count, sizeof(float));
     field.count = count;
     field.gradients = NULL;
     return field;
@@ -29,22 +28,22 @@ geomlib_scalar_field geomlib_scalar_field_create(size_t count) {
 
 void geomlib_scalar_field_free(geomlib_scalar_field *field) {
     if (!field) return;
-    free(field->values);
-    free(field->gradients);
-    memset(field, 0, sizeof(geomlib_scalar_field));
+    geomlib_free(field->values);
+    geomlib_free(field->gradients);
+    geomlib_memset(field, 0, sizeof(geomlib_scalar_field));
 }
 
 geomlib_vector_field geomlib_vector_field_create(size_t count) {
     geomlib_vector_field field;
-    field.values = calloc(count, sizeof(geomlib_vec3));
+    field.values = geomlib_calloc(count, sizeof(geomlib_vec3));
     field.count = count;
     return field;
 }
 
 void geomlib_vector_field_free(geomlib_vector_field *field) {
     if (!field) return;
-    free(field->values);
-    memset(field, 0, sizeof(geomlib_vector_field));
+    geomlib_free(field->values);
+    geomlib_memset(field, 0, sizeof(geomlib_vector_field));
 }
 
 /* ============================================================================
@@ -374,7 +373,7 @@ float geomlib_interpolate_scalar(
 
 geomlib_streamline geomlib_streamline_create(size_t capacity) {
     geomlib_streamline stream;
-    stream.points = malloc(capacity * sizeof(geomlib_vec3));
+    stream.points = geomlib_malloc(capacity * sizeof(geomlib_vec3));
     stream.point_count = 0;
     stream.point_capacity = capacity;
     return stream;
@@ -382,8 +381,8 @@ geomlib_streamline geomlib_streamline_create(size_t capacity) {
 
 void geomlib_streamline_free(geomlib_streamline *streamline) {
     if (!streamline) return;
-    free(streamline->points);
-    memset(streamline, 0, sizeof(geomlib_streamline));
+    geomlib_free(streamline->points);
+    geomlib_memset(streamline, 0, sizeof(geomlib_streamline));
 }
 
 /* Interpolate velocity at point (simplified) */
@@ -427,7 +426,7 @@ int geomlib_trace_streamline(
         /* Add current point */
         if (streamline->point_count >= streamline->point_capacity) {
             streamline->point_capacity *= 2;
-            streamline->points = realloc(streamline->points,
+            streamline->points = geomlib_realloc(streamline->points,
                 streamline->point_capacity * sizeof(geomlib_vec3));
         }
         streamline->points[streamline->point_count++] = current;
@@ -524,7 +523,7 @@ geomlib_cfd_quality geomlib_compute_cfd_quality(
     const geomlib_cfd_quality_thresholds *thresholds
 ) {
     geomlib_cfd_quality quality;
-    memset(&quality, 0, sizeof(quality));
+    geomlib_memset(&quality, 0, sizeof(quality));
 
     if (!mesh || tet_idx >= mesh->tetrahedron_count) {
         return quality;
@@ -586,7 +585,7 @@ geomlib_cfd_quality geomlib_compute_cfd_quality(
 
 geomlib_particle_system geomlib_particle_system_create(size_t capacity) {
     geomlib_particle_system system;
-    system.particles = malloc(capacity * sizeof(geomlib_particle));
+    system.particles = geomlib_malloc(capacity * sizeof(geomlib_particle));
     system.particle_count = 0;
     system.particle_capacity = capacity;
     return system;
@@ -594,8 +593,8 @@ geomlib_particle_system geomlib_particle_system_create(size_t capacity) {
 
 void geomlib_particle_system_free(geomlib_particle_system *system) {
     if (!system) return;
-    free(system->particles);
-    memset(system, 0, sizeof(geomlib_particle_system));
+    geomlib_free(system->particles);
+    geomlib_memset(system, 0, sizeof(geomlib_particle_system));
 }
 
 int geomlib_advect_particles(

@@ -3,10 +3,9 @@
  * Delaunay tetrahedralization for CFD simulations
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_tetramesh.h"
-#include <stdlib.h>
-#include <string.h>
-#include <math.h>
 #include <float.h>
 
 #ifndef M_PI
@@ -22,8 +21,8 @@ void geomlib_tetramesh_init(
     size_t vertex_capacity,
     size_t tetrahedron_capacity
 ) {
-    mesh->vertices = malloc(vertex_capacity * sizeof(geomlib_vec3));
-    mesh->tetrahedra = malloc(tetrahedron_capacity * sizeof(geomlib_tetrahedron));
+    mesh->vertices = geomlib_malloc(vertex_capacity * sizeof(geomlib_vec3));
+    mesh->tetrahedra = geomlib_malloc(tetrahedron_capacity * sizeof(geomlib_tetrahedron));
     mesh->boundary_faces = NULL;
     mesh->is_boundary_vertex = NULL;
 
@@ -37,12 +36,12 @@ void geomlib_tetramesh_init(
 void geomlib_tetramesh_free(geomlib_tetramesh *mesh) {
     if (!mesh) return;
 
-    free(mesh->vertices);
-    free(mesh->tetrahedra);
-    free(mesh->boundary_faces);
-    free(mesh->is_boundary_vertex);
+    geomlib_free(mesh->vertices);
+    geomlib_free(mesh->tetrahedra);
+    geomlib_free(mesh->boundary_faces);
+    geomlib_free(mesh->is_boundary_vertex);
 
-    memset(mesh, 0, sizeof(geomlib_tetramesh));
+    geomlib_memset(mesh, 0, sizeof(geomlib_tetramesh));
 }
 
 uint32_t geomlib_tetramesh_add_vertex(
@@ -51,7 +50,7 @@ uint32_t geomlib_tetramesh_add_vertex(
 ) {
     if (mesh->vertex_count >= mesh->vertex_capacity) {
         mesh->vertex_capacity *= 2;
-        mesh->vertices = realloc(mesh->vertices,
+        mesh->vertices = geomlib_realloc(mesh->vertices,
             mesh->vertex_capacity * sizeof(geomlib_vec3));
     }
 
@@ -65,7 +64,7 @@ uint32_t geomlib_tetramesh_add_tetrahedron(
 ) {
     if (mesh->tetrahedron_count >= mesh->tetrahedron_capacity) {
         mesh->tetrahedron_capacity *= 2;
-        mesh->tetrahedra = realloc(mesh->tetrahedra,
+        mesh->tetrahedra = geomlib_realloc(mesh->tetrahedra,
             mesh->tetrahedron_capacity * sizeof(geomlib_tetrahedron));
     }
 
@@ -287,7 +286,7 @@ int geomlib_tetrahedralize_points(
         uint32_t new_vertex = geomlib_tetramesh_add_vertex(tetramesh, points[i]);
 
         /* Find all tetrahedra whose circumsphere contains the new point (cavity) */
-        bool *bad_tet = calloc(tetramesh->tetrahedron_count, sizeof(bool));
+        bool *bad_tet = geomlib_calloc(tetramesh->tetrahedron_count, sizeof(bool));
         size_t bad_count = 0;
 
         for (size_t t = 0; t < tetramesh->tetrahedron_count; t++) {
@@ -304,13 +303,13 @@ int geomlib_tetrahedralize_points(
         }
 
         if (bad_count == 0) {
-            free(bad_tet);
+            geomlib_free(bad_tet);
             continue;
         }
 
         /* Find boundary faces of cavity (faces belonging to exactly 1 bad tet) */
         #define MAX_FACES 10000
-        face *cavity_faces = malloc(MAX_FACES * sizeof(face));
+        face *cavity_faces = geomlib_malloc(MAX_FACES * sizeof(face));
         size_t face_count = 0;
 
         for (size_t t = 0; t < tetramesh->tetrahedron_count; t++) {
@@ -379,8 +378,8 @@ int geomlib_tetrahedralize_points(
             }
         }
 
-        free(cavity_faces);
-        free(bad_tet);
+        geomlib_free(cavity_faces);
+        geomlib_free(bad_tet);
     }
 
     /* Remove tetrahedra containing super-tetrahedron vertices */
@@ -410,7 +409,7 @@ int geomlib_tetrahedralize_points(
     tetramesh->tetrahedron_count = write_idx;
 
     /* Remove super-tetrahedron vertices */
-    memmove(tetramesh->vertices, tetramesh->vertices + 4,
+    geomlib_memmove(tetramesh->vertices, tetramesh->vertices + 4,
         (tetramesh->vertex_count - 4) * sizeof(geomlib_vec3));
     tetramesh->vertex_count -= 4;
 
@@ -438,7 +437,7 @@ int geomlib_tetrahedralize_box(
 
     /* Generate grid points */
     size_t point_count = nx * ny * nz;
-    geomlib_vec3 *points = malloc(point_count * sizeof(geomlib_vec3));
+    geomlib_vec3 *points = geomlib_malloc(point_count * sizeof(geomlib_vec3));
 
     size_t idx = 0;
     for (int k = 0; k < nz; k++) {
@@ -460,7 +459,7 @@ int geomlib_tetrahedralize_box(
     /* Tetrahedralize */
     int result = geomlib_tetrahedralize_points(points, point_count, tetramesh);
 
-    free(points);
+    geomlib_free(points);
     return result;
 }
 
@@ -501,19 +500,19 @@ int geomlib_tetrahedralize_constrained(
 
     /* Combine boundary vertices with interior points */
     size_t total_points = boundary->vertex_count + interior_count;
-    geomlib_vec3 *all_points = malloc(total_points * sizeof(geomlib_vec3));
+    geomlib_vec3 *all_points = geomlib_malloc(total_points * sizeof(geomlib_vec3));
 
-    memcpy(all_points, boundary->vertices,
+    geomlib_memcpy(all_points, boundary->vertices,
         boundary->vertex_count * sizeof(geomlib_vec3));
 
     if (interior_points && interior_count > 0) {
-        memcpy(all_points + boundary->vertex_count, interior_points,
+        geomlib_memcpy(all_points + boundary->vertex_count, interior_points,
             interior_count * sizeof(geomlib_vec3));
     }
 
     int result = geomlib_tetrahedralize_points(all_points, total_points, tetramesh);
 
-    free(all_points);
+    geomlib_free(all_points);
     return result;
 }
 
@@ -526,7 +525,7 @@ geomlib_tetra_quality geomlib_compute_tetra_quality(
     uint32_t tetra_idx
 ) {
     geomlib_tetra_quality quality;
-    memset(&quality, 0, sizeof(quality));
+    geomlib_memset(&quality, 0, sizeof(quality));
 
     if (tetra_idx >= mesh->tetrahedron_count) return quality;
 
@@ -602,7 +601,7 @@ void geomlib_tetramesh_compute_stats(
 ) {
     if (!mesh || !stats) return;
 
-    memset(stats, 0, sizeof(geomlib_tetramesh_stats));
+    geomlib_memset(stats, 0, sizeof(geomlib_tetramesh_stats));
 
     stats->vertex_count = mesh->vertex_count;
     stats->tetrahedron_count = mesh->tetrahedron_count;
@@ -664,7 +663,7 @@ int geomlib_tetramesh_extract_boundary(
         uint32_t count;
     } boundary_face;
 
-    boundary_face *faces = malloc(MAX_BOUNDARY_FACES * sizeof(boundary_face));
+    boundary_face *faces = geomlib_malloc(MAX_BOUNDARY_FACES * sizeof(boundary_face));
     size_t face_count = 0;
 
     /* Collect all faces */
@@ -714,7 +713,7 @@ int geomlib_tetramesh_extract_boundary(
         }
     }
 
-    free(faces);
+    geomlib_free(faces);
     return GEOMLIB_MESH_SUCCESS;
 }
 

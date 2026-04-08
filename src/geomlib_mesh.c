@@ -5,10 +5,9 @@
  * Mesh and Polygon Implementation
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_mesh.h"
-#include <math.h>
-#include <stdlib.h>
-#include <string.h>
 #include <float.h>
 
 #ifndef M_PI
@@ -28,7 +27,7 @@ int geomlib_polygon2d_init(geomlib_polygon2d *poly, size_t initial_capacity) {
         initial_capacity = 8;
     }
     
-    poly->vertices = (geomlib_vec2 *)malloc(initial_capacity * sizeof(geomlib_vec2));
+    poly->vertices = (geomlib_vec2 *)geomlib_malloc(initial_capacity * sizeof(geomlib_vec2));
     if (poly->vertices == NULL) {
         return GEOMLIB_MESH_ERROR_MEMORY;
     }
@@ -40,7 +39,7 @@ int geomlib_polygon2d_init(geomlib_polygon2d *poly, size_t initial_capacity) {
 
 void geomlib_polygon2d_free(geomlib_polygon2d *poly) {
     if (poly != NULL) {
-        free(poly->vertices);
+        geomlib_free(poly->vertices);
         poly->vertices = NULL;
         poly->vertex_count = 0;
         poly->capacity = 0;
@@ -54,7 +53,7 @@ int geomlib_polygon2d_add_vertex(geomlib_polygon2d *poly, geomlib_vec2 v) {
     
     if (poly->vertex_count >= poly->capacity) {
         size_t new_capacity = poly->capacity * 2;
-        geomlib_vec2 *new_vertices = (geomlib_vec2 *)realloc(poly->vertices, 
+        geomlib_vec2 *new_vertices = (geomlib_vec2 *)geomlib_realloc(poly->vertices, 
                                                               new_capacity * sizeof(geomlib_vec2));
         if (new_vertices == NULL) {
             return GEOMLIB_MESH_ERROR_MEMORY;
@@ -217,7 +216,7 @@ int geomlib_polygon3d_init(geomlib_polygon3d *poly, size_t initial_capacity) {
         initial_capacity = 8;
     }
     
-    poly->vertices = (geomlib_vec3 *)malloc(initial_capacity * sizeof(geomlib_vec3));
+    poly->vertices = (geomlib_vec3 *)geomlib_malloc(initial_capacity * sizeof(geomlib_vec3));
     if (poly->vertices == NULL) {
         return GEOMLIB_MESH_ERROR_MEMORY;
     }
@@ -229,7 +228,7 @@ int geomlib_polygon3d_init(geomlib_polygon3d *poly, size_t initial_capacity) {
 
 void geomlib_polygon3d_free(geomlib_polygon3d *poly) {
     if (poly != NULL) {
-        free(poly->vertices);
+        geomlib_free(poly->vertices);
         poly->vertices = NULL;
         poly->vertex_count = 0;
         poly->capacity = 0;
@@ -243,7 +242,7 @@ int geomlib_polygon3d_add_vertex(geomlib_polygon3d *poly, geomlib_vec3 v) {
     
     if (poly->vertex_count >= poly->capacity) {
         size_t new_capacity = poly->capacity * 2;
-        geomlib_vec3 *new_vertices = (geomlib_vec3 *)realloc(poly->vertices, 
+        geomlib_vec3 *new_vertices = (geomlib_vec3 *)geomlib_realloc(poly->vertices, 
                                                               new_capacity * sizeof(geomlib_vec3));
         if (new_vertices == NULL) {
             return GEOMLIB_MESH_ERROR_MEMORY;
@@ -331,14 +330,14 @@ int geomlib_trimesh_init(geomlib_trimesh *mesh, size_t vertex_capacity, size_t t
     if (vertex_capacity == 0) vertex_capacity = 64;
     if (triangle_capacity == 0) triangle_capacity = 64;
     
-    mesh->vertices = (geomlib_vec3 *)malloc(vertex_capacity * sizeof(geomlib_vec3));
+    mesh->vertices = (geomlib_vec3 *)geomlib_malloc(vertex_capacity * sizeof(geomlib_vec3));
     mesh->normals = NULL;  /* Allocated on demand */
     mesh->texcoords = NULL;
-    mesh->indices = (uint32_t *)malloc(triangle_capacity * 3 * sizeof(uint32_t));
+    mesh->indices = (uint32_t *)geomlib_malloc(triangle_capacity * 3 * sizeof(uint32_t));
     
     if (mesh->vertices == NULL || mesh->indices == NULL) {
-        free(mesh->vertices);
-        free(mesh->indices);
+        geomlib_free(mesh->vertices);
+        geomlib_free(mesh->indices);
         mesh->vertices = NULL;
         mesh->indices = NULL;
         return GEOMLIB_MESH_ERROR_MEMORY;
@@ -354,10 +353,10 @@ int geomlib_trimesh_init(geomlib_trimesh *mesh, size_t vertex_capacity, size_t t
 
 void geomlib_trimesh_free(geomlib_trimesh *mesh) {
     if (mesh != NULL) {
-        free(mesh->vertices);
-        free(mesh->normals);
-        free(mesh->texcoords);
-        free(mesh->indices);
+        geomlib_free(mesh->vertices);
+        geomlib_free(mesh->normals);
+        geomlib_free(mesh->texcoords);
+        geomlib_free(mesh->indices);
         mesh->vertices = NULL;
         mesh->normals = NULL;
         mesh->texcoords = NULL;
@@ -375,7 +374,7 @@ int geomlib_trimesh_reserve_vertices(geomlib_trimesh *mesh, size_t count) {
     }
     
     if (count > mesh->vertex_capacity) {
-        geomlib_vec3 *new_vertices = (geomlib_vec3 *)realloc(mesh->vertices, 
+        geomlib_vec3 *new_vertices = (geomlib_vec3 *)geomlib_realloc(mesh->vertices, 
                                                               count * sizeof(geomlib_vec3));
         if (new_vertices == NULL) {
             return GEOMLIB_MESH_ERROR_MEMORY;
@@ -383,7 +382,7 @@ int geomlib_trimesh_reserve_vertices(geomlib_trimesh *mesh, size_t count) {
         mesh->vertices = new_vertices;
         
         if (mesh->normals != NULL) {
-            geomlib_vec3 *new_normals = (geomlib_vec3 *)realloc(mesh->normals,
+            geomlib_vec3 *new_normals = (geomlib_vec3 *)geomlib_realloc(mesh->normals,
                                                                  count * sizeof(geomlib_vec3));
             if (new_normals == NULL) {
                 return GEOMLIB_MESH_ERROR_MEMORY;
@@ -392,7 +391,7 @@ int geomlib_trimesh_reserve_vertices(geomlib_trimesh *mesh, size_t count) {
         }
         
         if (mesh->texcoords != NULL) {
-            geomlib_vec2 *new_texcoords = (geomlib_vec2 *)realloc(mesh->texcoords,
+            geomlib_vec2 *new_texcoords = (geomlib_vec2 *)geomlib_realloc(mesh->texcoords,
                                                                    count * sizeof(geomlib_vec2));
             if (new_texcoords == NULL) {
                 return GEOMLIB_MESH_ERROR_MEMORY;
@@ -412,7 +411,7 @@ int geomlib_trimesh_reserve_triangles(geomlib_trimesh *mesh, size_t count) {
     }
     
     if (count > mesh->triangle_capacity) {
-        uint32_t *new_indices = (uint32_t *)realloc(mesh->indices, 
+        uint32_t *new_indices = (uint32_t *)geomlib_realloc(mesh->indices, 
                                                      count * 3 * sizeof(uint32_t));
         if (new_indices == NULL) {
             return GEOMLIB_MESH_ERROR_MEMORY;
@@ -441,7 +440,7 @@ int geomlib_trimesh_add_vertex(geomlib_trimesh *mesh, geomlib_vec3 pos,
     
     if (normal != NULL) {
         if (mesh->normals == NULL) {
-            mesh->normals = (geomlib_vec3 *)calloc(mesh->vertex_capacity, sizeof(geomlib_vec3));
+            mesh->normals = (geomlib_vec3 *)geomlib_calloc(mesh->vertex_capacity, sizeof(geomlib_vec3));
             if (mesh->normals == NULL) {
                 return GEOMLIB_MESH_ERROR_MEMORY;
             }
@@ -451,7 +450,7 @@ int geomlib_trimesh_add_vertex(geomlib_trimesh *mesh, geomlib_vec3 pos,
     
     if (texcoord != NULL) {
         if (mesh->texcoords == NULL) {
-            mesh->texcoords = (geomlib_vec2 *)calloc(mesh->vertex_capacity, sizeof(geomlib_vec2));
+            mesh->texcoords = (geomlib_vec2 *)geomlib_calloc(mesh->vertex_capacity, sizeof(geomlib_vec2));
             if (mesh->texcoords == NULL) {
                 return GEOMLIB_MESH_ERROR_MEMORY;
             }
@@ -541,14 +540,14 @@ int geomlib_trimesh_compute_normals(geomlib_trimesh *mesh) {
     
     /* Allocate normals if needed */
     if (mesh->normals == NULL) {
-        mesh->normals = (geomlib_vec3 *)calloc(mesh->vertex_capacity, sizeof(geomlib_vec3));
+        mesh->normals = (geomlib_vec3 *)geomlib_calloc(mesh->vertex_capacity, sizeof(geomlib_vec3));
         if (mesh->normals == NULL) {
             return GEOMLIB_MESH_ERROR_MEMORY;
         }
     }
     
     /* Zero out normals */
-    memset(mesh->normals, 0, mesh->vertex_count * sizeof(geomlib_vec3));
+    geomlib_memset(mesh->normals, 0, mesh->vertex_count * sizeof(geomlib_vec3));
     
     /* Accumulate face normals weighted by area */
     for (size_t i = 0; i < mesh->triangle_count; i++) {
@@ -655,14 +654,14 @@ int geomlib_polymesh_init(geomlib_polymesh *mesh, size_t vertex_capacity, size_t
     if (vertex_capacity == 0) vertex_capacity = 64;
     if (face_capacity == 0) face_capacity = 32;
     
-    mesh->vertices = (geomlib_vec3 *)malloc(vertex_capacity * sizeof(geomlib_vec3));
-    mesh->faces = (geomlib_face *)calloc(face_capacity, sizeof(geomlib_face));
+    mesh->vertices = (geomlib_vec3 *)geomlib_malloc(vertex_capacity * sizeof(geomlib_vec3));
+    mesh->faces = (geomlib_face *)geomlib_calloc(face_capacity, sizeof(geomlib_face));
     mesh->normals = NULL;
     mesh->texcoords = NULL;
     
     if (mesh->vertices == NULL || mesh->faces == NULL) {
-        free(mesh->vertices);
-        free(mesh->faces);
+        geomlib_free(mesh->vertices);
+        geomlib_free(mesh->faces);
         mesh->vertices = NULL;
         mesh->faces = NULL;
         return GEOMLIB_MESH_ERROR_MEMORY;
@@ -678,15 +677,15 @@ int geomlib_polymesh_init(geomlib_polymesh *mesh, size_t vertex_capacity, size_t
 
 void geomlib_polymesh_free(geomlib_polymesh *mesh) {
     if (mesh != NULL) {
-        free(mesh->vertices);
-        free(mesh->normals);
-        free(mesh->texcoords);
+        geomlib_free(mesh->vertices);
+        geomlib_free(mesh->normals);
+        geomlib_free(mesh->texcoords);
         
         if (mesh->faces != NULL) {
             for (size_t i = 0; i < mesh->face_count; i++) {
-                free(mesh->faces[i].vertex_indices);
+                geomlib_free(mesh->faces[i].vertex_indices);
             }
-            free(mesh->faces);
+            geomlib_free(mesh->faces);
         }
         
         mesh->vertices = NULL;
@@ -705,7 +704,7 @@ int geomlib_polymesh_add_vertex(geomlib_polymesh *mesh, geomlib_vec3 pos) {
     
     if (mesh->vertex_count >= mesh->vertex_capacity) {
         size_t new_capacity = mesh->vertex_capacity * 2;
-        geomlib_vec3 *new_vertices = (geomlib_vec3 *)realloc(mesh->vertices,
+        geomlib_vec3 *new_vertices = (geomlib_vec3 *)geomlib_realloc(mesh->vertices,
                                                               new_capacity * sizeof(geomlib_vec3));
         if (new_vertices == NULL) {
             return GEOMLIB_MESH_ERROR_MEMORY;
@@ -725,7 +724,7 @@ int geomlib_polymesh_add_face(geomlib_polymesh *mesh, const uint32_t *indices, s
     
     if (mesh->face_count >= mesh->face_capacity) {
         size_t new_capacity = mesh->face_capacity * 2;
-        geomlib_face *new_faces = (geomlib_face *)realloc(mesh->faces,
+        geomlib_face *new_faces = (geomlib_face *)geomlib_realloc(mesh->faces,
                                                            new_capacity * sizeof(geomlib_face));
         if (new_faces == NULL) {
             return GEOMLIB_MESH_ERROR_MEMORY;
@@ -741,12 +740,12 @@ int geomlib_polymesh_add_face(geomlib_polymesh *mesh, const uint32_t *indices, s
     }
     
     geomlib_face *face = &mesh->faces[mesh->face_count];
-    face->vertex_indices = (uint32_t *)malloc(count * sizeof(uint32_t));
+    face->vertex_indices = (uint32_t *)geomlib_malloc(count * sizeof(uint32_t));
     if (face->vertex_indices == NULL) {
         return GEOMLIB_MESH_ERROR_MEMORY;
     }
     
-    memcpy(face->vertex_indices, indices, count * sizeof(uint32_t));
+    geomlib_memcpy(face->vertex_indices, indices, count * sizeof(uint32_t));
     face->vertex_count = count;
     mesh->face_count++;
     
@@ -756,7 +755,7 @@ int geomlib_polymesh_add_face(geomlib_polymesh *mesh, const uint32_t *indices, s
 void geomlib_polymesh_clear(geomlib_polymesh *mesh) {
     if (mesh != NULL) {
         for (size_t i = 0; i < mesh->face_count; i++) {
-            free(mesh->faces[i].vertex_indices);
+            geomlib_free(mesh->faces[i].vertex_indices);
             mesh->faces[i].vertex_indices = NULL;
             mesh->faces[i].vertex_count = 0;
         }

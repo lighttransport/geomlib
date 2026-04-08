@@ -2,12 +2,11 @@
  * geomlib - Collision Detection and Mesh Reduction Implementation
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_collision.h"
 #include "geomlib/geomlib_solver.h"
-#include <stdlib.h>
-#include <string.h>
 #include <float.h>
-#include <math.h>
 
 /* ============================================================================
  * Helper Functions
@@ -366,17 +365,17 @@ int geomlib_generate_collision_proxy(
             proxy_out->vertex_capacity = mesh->vertex_count;
             proxy_out->triangle_capacity = mesh->triangle_count;
 
-            proxy_out->vertices = (geomlib_vec3*)malloc(mesh->vertex_count * sizeof(geomlib_vec3));
-            proxy_out->indices = (uint32_t*)malloc(mesh->triangle_count * 3 * sizeof(uint32_t));
+            proxy_out->vertices = (geomlib_vec3*)geomlib_malloc(mesh->vertex_count * sizeof(geomlib_vec3));
+            proxy_out->indices = (uint32_t*)geomlib_malloc(mesh->triangle_count * 3 * sizeof(uint32_t));
 
             if (!proxy_out->vertices || !proxy_out->indices) {
-                free(proxy_out->vertices);
-                free(proxy_out->indices);
+                geomlib_free(proxy_out->vertices);
+                geomlib_free(proxy_out->indices);
                 return GEOMLIB_MESH_ERROR_MEMORY;
             }
 
-            memcpy(proxy_out->vertices, mesh->vertices, mesh->vertex_count * sizeof(geomlib_vec3));
-            memcpy(proxy_out->indices, mesh->indices, mesh->triangle_count * 3 * sizeof(uint32_t));
+            geomlib_memcpy(proxy_out->vertices, mesh->vertices, mesh->vertex_count * sizeof(geomlib_vec3));
+            geomlib_memcpy(proxy_out->indices, mesh->indices, mesh->triangle_count * 3 * sizeof(uint32_t));
 
             proxy_out->normals = NULL;
             proxy_out->texcoords = NULL;

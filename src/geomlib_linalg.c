@@ -5,9 +5,9 @@
  * Linear Algebra Implementation
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_linalg.h"
-#include <math.h>
-#include <string.h>
 
 /* Column-major matrix access helper - element at row r, col c */
 /* mat3: index = c*3 + r */
@@ -254,7 +254,7 @@ geomlib_vec4 geomlib_vec4_negate(geomlib_vec4 v) {
 
 geomlib_mat3 geomlib_mat3_identity(void) {
     geomlib_mat3 mat;
-    memset(&mat, 0, sizeof(mat));
+    geomlib_memset(&mat, 0, sizeof(mat));
     mat.m[0] = 1.0f;  /* (0,0) */
     mat.m[4] = 1.0f;  /* (1,1) */
     mat.m[8] = 1.0f;  /* (2,2) */
@@ -263,7 +263,7 @@ geomlib_mat3 geomlib_mat3_identity(void) {
 
 geomlib_mat3 geomlib_mat3_zero(void) {
     geomlib_mat3 mat;
-    memset(&mat, 0, sizeof(mat));
+    geomlib_memset(&mat, 0, sizeof(mat));
     return mat;
 }
 
@@ -363,7 +363,7 @@ int geomlib_mat3_inverse(geomlib_mat3 mat, geomlib_mat3 *out) {
 
 geomlib_mat4 geomlib_mat4_identity(void) {
     geomlib_mat4 mat;
-    memset(&mat, 0, sizeof(mat));
+    geomlib_memset(&mat, 0, sizeof(mat));
     mat.m[0] = 1.0f;   /* (0,0) */
     mat.m[5] = 1.0f;   /* (1,1) */
     mat.m[10] = 1.0f;  /* (2,2) */
@@ -373,7 +373,7 @@ geomlib_mat4 geomlib_mat4_identity(void) {
 
 geomlib_mat4 geomlib_mat4_zero(void) {
     geomlib_mat4 mat;
-    memset(&mat, 0, sizeof(mat));
+    geomlib_memset(&mat, 0, sizeof(mat));
     return mat;
 }
 
@@ -765,7 +765,7 @@ geomlib_vec3d geomlib_vec3d_normalize(geomlib_vec3d v) {
 
 geomlib_mat4d geomlib_mat4d_identity(void) {
     geomlib_mat4d mat;
-    memset(&mat, 0, sizeof(mat));
+    geomlib_memset(&mat, 0, sizeof(mat));
     mat.m[0] = 1.0;   /* (0,0) */
     mat.m[5] = 1.0;   /* (1,1) */
     mat.m[10] = 1.0;  /* (2,2) */

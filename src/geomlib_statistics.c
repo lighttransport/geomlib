@@ -2,13 +2,12 @@
  * geomlib - Mesh Statistics Implementation (Basic)
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_statistics.h"
 #include "geomlib/geomlib_topology.h"
 #include "geomlib/geomlib_montecarlo.h"
-#include <stdlib.h>
-#include <string.h>
 #include <stdio.h>
-#include <math.h>
 #include <float.h>
 
 /* ============================================================================
@@ -70,7 +69,7 @@ geomlib_edge_stats geomlib_compute_edge_stats(
     /* Build edge mesh */
     geomlib_edge_mesh edge_mesh = geomlib_build_edge_mesh(mesh);
 
-    float *lengths = (float*)malloc(edge_mesh.edge_count * sizeof(float));
+    float *lengths = (float*)geomlib_malloc(edge_mesh.edge_count * sizeof(float));
     stats.min_length = FLT_MAX;
     stats.max_length = 0.0f;
     float sum = 0.0f;
@@ -116,7 +115,7 @@ geomlib_edge_stats geomlib_compute_edge_stats(
 
     /* Build histogram */
     if (histogram_bins > 0) {
-        stats.histogram = (uint32_t*)calloc(histogram_bins, sizeof(uint32_t));
+        stats.histogram = (uint32_t*)geomlib_calloc(histogram_bins, sizeof(uint32_t));
         stats.bin_width = (stats.max_length - stats.min_length) / (float)histogram_bins;
 
         for (size_t i = 0; i < edge_mesh.edge_count; i++) {
@@ -126,14 +125,14 @@ geomlib_edge_stats geomlib_compute_edge_stats(
         }
     }
 
-    free(lengths);
+    geomlib_free(lengths);
     geomlib_edge_mesh_free(&edge_mesh);
 
     return stats;
 }
 
 void geomlib_edge_stats_free(geomlib_edge_stats *stats) {
-    free(stats->histogram);
+    geomlib_free(stats->histogram);
 }
 
 /* ============================================================================
@@ -151,7 +150,7 @@ geomlib_angle_stats geomlib_compute_angle_stats(
     stats.poor_quality_count = 0;
 
     size_t angle_count = mesh->triangle_count * 3;
-    float *angles = (float*)malloc(angle_count * sizeof(float));
+    float *angles = (float*)geomlib_malloc(angle_count * sizeof(float));
 
     stats.min_angle_deg = 180.0f;
     stats.max_angle_deg = 0.0f;
@@ -185,7 +184,7 @@ geomlib_angle_stats geomlib_compute_angle_stats(
 
     /* Build histogram */
     if (histogram_bins > 0) {
-        stats.histogram = (uint32_t*)calloc(histogram_bins, sizeof(uint32_t));
+        stats.histogram = (uint32_t*)geomlib_calloc(histogram_bins, sizeof(uint32_t));
         stats.bin_width = 180.0f / (float)histogram_bins;
 
         for (size_t i = 0; i < angle_count; i++) {
@@ -195,12 +194,12 @@ geomlib_angle_stats geomlib_compute_angle_stats(
         }
     }
 
-    free(angles);
+    geomlib_free(angles);
     return stats;
 }
 
 void geomlib_angle_stats_free(geomlib_angle_stats *stats) {
-    free(stats->histogram);
+    geomlib_free(stats->histogram);
 }
 
 /* ============================================================================
@@ -215,7 +214,7 @@ geomlib_area_stats geomlib_compute_area_stats(
     stats.histogram = NULL;
     stats.bin_count = histogram_bins;
 
-    float *areas = (float*)malloc(mesh->triangle_count * sizeof(float));
+    float *areas = (float*)geomlib_malloc(mesh->triangle_count * sizeof(float));
     stats.min_area = FLT_MAX;
     stats.max_area = 0.0f;
     stats.total_area = 0.0f;
@@ -247,7 +246,7 @@ geomlib_area_stats geomlib_compute_area_stats(
 
     /* Build histogram */
     if (histogram_bins > 0 && stats.max_area > stats.min_area) {
-        stats.histogram = (uint32_t*)calloc(histogram_bins, sizeof(uint32_t));
+        stats.histogram = (uint32_t*)geomlib_calloc(histogram_bins, sizeof(uint32_t));
         stats.bin_width = (stats.max_area - stats.min_area) / (float)histogram_bins;
 
         for (size_t i = 0; i < mesh->triangle_count; i++) {
@@ -257,12 +256,12 @@ geomlib_area_stats geomlib_compute_area_stats(
         }
     }
 
-    free(areas);
+    geomlib_free(areas);
     return stats;
 }
 
 void geomlib_area_stats_free(geomlib_area_stats *stats) {
-    free(stats->histogram);
+    geomlib_free(stats->histogram);
 }
 
 /* ============================================================================
@@ -280,7 +279,7 @@ geomlib_aspect_ratio_stats geomlib_compute_aspect_ratio_stats(
     stats.acceptable_count = 0;
     stats.poor_count = 0;
 
-    float *ratios = (float*)malloc(mesh->triangle_count * sizeof(float));
+    float *ratios = (float*)geomlib_malloc(mesh->triangle_count * sizeof(float));
     stats.min_ratio = FLT_MAX;
     stats.max_ratio = 0.0f;
     float sum = 0.0f;
@@ -306,7 +305,7 @@ geomlib_aspect_ratio_stats geomlib_compute_aspect_ratio_stats(
 
     /* Build histogram */
     if (histogram_bins > 0 && stats.max_ratio > stats.min_ratio) {
-        stats.histogram = (uint32_t*)calloc(histogram_bins, sizeof(uint32_t));
+        stats.histogram = (uint32_t*)geomlib_calloc(histogram_bins, sizeof(uint32_t));
         stats.bin_width = (stats.max_ratio - stats.min_ratio) / (float)histogram_bins;
 
         for (size_t i = 0; i < mesh->triangle_count; i++) {
@@ -316,12 +315,12 @@ geomlib_aspect_ratio_stats geomlib_compute_aspect_ratio_stats(
         }
     }
 
-    free(ratios);
+    geomlib_free(ratios);
     return stats;
 }
 
 void geomlib_aspect_ratio_stats_free(geomlib_aspect_ratio_stats *stats) {
-    free(stats->histogram);
+    geomlib_free(stats->histogram);
 }
 
 /* ============================================================================
@@ -396,7 +395,7 @@ geomlib_validation_result geomlib_validate_mesh(
 
     /* Allocate space for issues (worst case: all triangles have issues) */
     size_t max_issues = mesh->triangle_count * 3;
-    geomlib_validation_issue *issues = (geomlib_validation_issue*)malloc(
+    geomlib_validation_issue *issues = (geomlib_validation_issue*)geomlib_malloc(
         max_issues * sizeof(geomlib_validation_issue));
     if (!issues) {
         return result;
@@ -476,18 +475,18 @@ geomlib_validation_result geomlib_validate_mesh(
 
     /* Store results */
     if (issue_count > 0) {
-        result.issues = (geomlib_validation_issue*)realloc(issues,
+        result.issues = (geomlib_validation_issue*)geomlib_realloc(issues,
             issue_count * sizeof(geomlib_validation_issue));
         result.issue_count = issue_count;
     } else {
-        free(issues);
+        geomlib_free(issues);
     }
 
     return result;
 }
 
 void geomlib_validation_result_free(geomlib_validation_result *result) {
-    free(result->issues);
+    geomlib_free(result->issues);
 }
 
 /* ============================================================================
@@ -499,7 +498,7 @@ geomlib_mesh_difference geomlib_compare_meshes(
     const geomlib_trimesh *mesh2
 ) {
     geomlib_mesh_difference diff;
-    memset(&diff, 0, sizeof(diff));
+    geomlib_memset(&diff, 0, sizeof(diff));
 
     if (!mesh1 || !mesh2) {
         return diff;

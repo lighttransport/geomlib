@@ -3,12 +3,14 @@
  * Based on Botsch-Kobbelt incremental remeshing (SGP 2004)
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
+#ifndef GEOMLIB_FREESTANDING
+#include <stdlib.h> /* qsort, abs */
+#endif
 #include "geomlib/geomlib_remeshing.h"
 #include "geomlib/geomlib_healing.h"
-#include <stdlib.h>
 #include <stdbool.h>
-#include <string.h>
-#include <math.h>
 #include <float.h>
 
 #ifndef M_PI
@@ -268,8 +270,8 @@ static void tangential_smoothing(
     bool *is_feature,
     bool preserve_boundaries
 ) {
-    geomlib_vec3 *new_positions = malloc(mesh->vertex_count * sizeof(geomlib_vec3));
-    memcpy(new_positions, mesh->vertices, mesh->vertex_count * sizeof(geomlib_vec3));
+    geomlib_vec3 *new_positions = geomlib_malloc(mesh->vertex_count * sizeof(geomlib_vec3));
+    geomlib_memcpy(new_positions, mesh->vertices, mesh->vertex_count * sizeof(geomlib_vec3));
 
     for (size_t v = 0; v < mesh->vertex_count; v++) {
         /* Skip feature vertices */
@@ -338,8 +340,8 @@ static void tangential_smoothing(
     }
 
     /* Update positions */
-    memcpy(mesh->vertices, new_positions, mesh->vertex_count * sizeof(geomlib_vec3));
-    free(new_positions);
+    geomlib_memcpy(mesh->vertices, new_positions, mesh->vertex_count * sizeof(geomlib_vec3));
+    geomlib_free(new_positions);
 }
 
 /* Detect feature edges based on dihedral angle */
@@ -348,7 +350,7 @@ static bool* detect_features(
     const geomlib_halfedge_mesh *hemesh,
     float feature_angle_degrees
 ) {
-    bool *is_feature = calloc(mesh->vertex_count, sizeof(bool));
+    bool *is_feature = geomlib_calloc(mesh->vertex_count, sizeof(bool));
     float cos_threshold = cosf(feature_angle_degrees * M_PI / 180.0f);
 
     for (size_t he_idx = 0; he_idx < hemesh->halfedge_count; he_idx++) {
@@ -469,8 +471,8 @@ int geomlib_remesh(
     /* Store original vertex positions for projection */
     geomlib_vec3 *original_positions = NULL;
     if (params->project_to_surface) {
-        original_positions = malloc(mesh->vertex_count * sizeof(geomlib_vec3));
-        memcpy(original_positions, mesh->vertices, mesh->vertex_count * sizeof(geomlib_vec3));
+        original_positions = geomlib_malloc(mesh->vertex_count * sizeof(geomlib_vec3));
+        geomlib_memcpy(original_positions, mesh->vertices, mesh->vertex_count * sizeof(geomlib_vec3));
     }
 
     /* Main remeshing loop */
@@ -607,8 +609,8 @@ int geomlib_remesh(
 
     /* Cleanup */
     geomlib_halfedge_free(&hemesh);
-    if (is_feature) free(is_feature);
-    if (original_positions) free(original_positions);
+    if (is_feature) geomlib_free(is_feature);
+    if (original_positions) geomlib_free(original_positions);
 
     /* Recompute normals */
     geomlib_trimesh_compute_normals(mesh);
@@ -706,7 +708,7 @@ void geomlib_compute_remeshing_stats(
 ) {
     if (!mesh || !stats) return;
 
-    memset(stats, 0, sizeof(geomlib_remeshing_stats));
+    geomlib_memset(stats, 0, sizeof(geomlib_remeshing_stats));
     stats->min_edge_length = FLT_MAX;
     stats->min_angle = 180.0f;
     stats->max_angle = 0.0f;

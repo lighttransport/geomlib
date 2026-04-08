@@ -5,8 +5,9 @@
  * Random Number Generation - PCG32 Implementation
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_random.h"
-#include <string.h>
 
 /* PCG32 constants */
 #define GEOMLIB_PCG32_MULT 0x5851f42d4c957f2dULL

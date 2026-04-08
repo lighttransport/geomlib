@@ -1,1 +1,0 @@
-/usr/bin/c++  -fno-rtti -fno-exceptions -Wl,--dependency-file=CMakeFiles/test_bvh.dir/link.d CMakeFiles/test_bvh.dir/test_bvh.cpp.o -o test_bvh  ../libgeomlib.a -lm

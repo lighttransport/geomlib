@@ -3,12 +3,11 @@
  * Based on Meyer et al. 2003 discrete differential geometry operators
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_curvature.h"
 #include "geomlib/geomlib_healing.h"
-#include <stdlib.h>
-#include <math.h>
 #include <float.h>
-#include <string.h>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -17,8 +16,8 @@
 /* Create curvature structure */
 geomlib_mesh_curvature geomlib_curvature_create(size_t vertex_count) {
     geomlib_mesh_curvature curv;
-    curv.curvatures = calloc(vertex_count, sizeof(geomlib_vertex_curvature));
-    curv.vertex_areas = calloc(vertex_count, sizeof(float));
+    curv.curvatures = geomlib_calloc(vertex_count, sizeof(geomlib_vertex_curvature));
+    curv.vertex_areas = geomlib_calloc(vertex_count, sizeof(float));
     curv.vertex_count = vertex_count;
     return curv;
 }
@@ -27,11 +26,11 @@ geomlib_mesh_curvature geomlib_curvature_create(size_t vertex_count) {
 void geomlib_curvature_free(geomlib_mesh_curvature *curv) {
     if (!curv) return;
     if (curv->curvatures) {
-        free(curv->curvatures);
+        geomlib_free(curv->curvatures);
         curv->curvatures = NULL;
     }
     if (curv->vertex_areas) {
-        free(curv->vertex_areas);
+        geomlib_free(curv->vertex_areas);
         curv->vertex_areas = NULL;
     }
     curv->vertex_count = 0;
@@ -313,19 +312,19 @@ int geomlib_compute_curvature(
     if (curvature->vertex_count != mesh->vertex_count) return GEOMLIB_MESH_ERROR_INVALID;
 
     /* Compute mean curvatures */
-    float *mean_curv = malloc(mesh->vertex_count * sizeof(float));
+    float *mean_curv = geomlib_malloc(mesh->vertex_count * sizeof(float));
     int result = geomlib_compute_mean_curvature(mesh, mean_curv);
     if (result != GEOMLIB_MESH_SUCCESS) {
-        free(mean_curv);
+        geomlib_free(mean_curv);
         return result;
     }
 
     /* Compute Gaussian curvatures */
-    float *gaussian_curv = malloc(mesh->vertex_count * sizeof(float));
+    float *gaussian_curv = geomlib_malloc(mesh->vertex_count * sizeof(float));
     result = geomlib_compute_gaussian_curvature(mesh, gaussian_curv);
     if (result != GEOMLIB_MESH_SUCCESS) {
-        free(mean_curv);
-        free(gaussian_curv);
+        geomlib_free(mean_curv);
+        geomlib_free(gaussian_curv);
         return result;
     }
 
@@ -488,8 +487,8 @@ int geomlib_compute_curvature(
         }
     }
 
-    free(mean_curv);
-    free(gaussian_curv);
+    geomlib_free(mean_curv);
+    geomlib_free(gaussian_curv);
 
     return GEOMLIB_MESH_SUCCESS;
 }

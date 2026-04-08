@@ -28,6 +28,8 @@ endif()
 
 # Library source files
 set(GEOMLIB_SOURCES
+    src/geomlib_allocator.c
+    src/geomlib_c11.c
     src/geomlib_linalg.c
     src/geomlib_solver.c
     src/geomlib_mesh.c

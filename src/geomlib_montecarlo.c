@@ -5,10 +5,9 @@
  * Monte Carlo Geometry Processing Implementation
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_montecarlo.h"
-#include <math.h>
-#include <stdlib.h>
-#include <string.h>
 #include <float.h>
 
 #ifndef M_PI
@@ -102,12 +101,12 @@ int geomlib_mesh_build_sample_distribution(
     }
 
     dist->triangle_count = mesh->triangle_count;
-    dist->triangle_areas = (float *)malloc(sizeof(float) * mesh->triangle_count);
-    dist->cdf = (float *)malloc(sizeof(float) * mesh->triangle_count);
+    dist->triangle_areas = (float *)geomlib_malloc(sizeof(float) * mesh->triangle_count);
+    dist->cdf = (float *)geomlib_malloc(sizeof(float) * mesh->triangle_count);
 
     if (!dist->triangle_areas || !dist->cdf) {
-        free(dist->triangle_areas);
-        free(dist->cdf);
+        geomlib_free(dist->triangle_areas);
+        geomlib_free(dist->cdf);
         return GEOMLIB_MESH_ERROR_MEMORY;
     }
 
@@ -147,8 +146,8 @@ void geomlib_mesh_free_sample_distribution(
     geomlib_mesh_sample_distribution *dist
 ) {
     if (dist) {
-        free(dist->triangle_areas);
-        free(dist->cdf);
+        geomlib_free(dist->triangle_areas);
+        geomlib_free(dist->cdf);
         dist->triangle_areas = NULL;
         dist->cdf = NULL;
         dist->triangle_count = 0;

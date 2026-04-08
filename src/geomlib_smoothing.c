@@ -2,11 +2,10 @@
  * geomlib - Mesh Smoothing Implementation
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_smoothing.h"
 #include "geomlib/geomlib_healing.h"
-#include <stdlib.h>
-#include <string.h>
-#include <math.h>
 
 /* Create default smoothing parameters */
 geomlib_smoothing_params geomlib_smoothing_params_default(geomlib_smoothing_method method) {
@@ -38,7 +37,7 @@ int geomlib_smooth_mesh(
     /* Identify boundary vertices */
     bool *is_boundary = NULL;
     if (params->preserve_boundaries) {
-        is_boundary = calloc(mesh->vertex_count, sizeof(bool));
+        is_boundary = geomlib_calloc(mesh->vertex_count, sizeof(bool));
 
         for (size_t he = 0; he < hemesh.halfedge_count; he++) {
             if (hemesh.halfedges[he].twin == UINT32_MAX) {
@@ -48,16 +47,16 @@ int geomlib_smooth_mesh(
     }
 
     /* Allocate temporary vertex positions */
-    geomlib_vec3 *new_positions = malloc(mesh->vertex_count * sizeof(geomlib_vec3));
-    geomlib_vec3 *temp_positions = malloc(mesh->vertex_count * sizeof(geomlib_vec3));
+    geomlib_vec3 *new_positions = geomlib_malloc(mesh->vertex_count * sizeof(geomlib_vec3));
+    geomlib_vec3 *temp_positions = geomlib_malloc(mesh->vertex_count * sizeof(geomlib_vec3));
 
     /* Initialize with current positions */
-    memcpy(new_positions, mesh->vertices, mesh->vertex_count * sizeof(geomlib_vec3));
+    geomlib_memcpy(new_positions, mesh->vertices, mesh->vertex_count * sizeof(geomlib_vec3));
 
     /* Perform smoothing iterations */
     for (int iter = 0; iter < params->iterations; iter++) {
         /* Copy current positions to temp */
-        memcpy(temp_positions, new_positions, mesh->vertex_count * sizeof(geomlib_vec3));
+        geomlib_memcpy(temp_positions, new_positions, mesh->vertex_count * sizeof(geomlib_vec3));
 
         /* Laplacian pass */
         for (size_t v = 0; v < mesh->vertex_count; v++) {
@@ -113,7 +112,7 @@ int geomlib_smooth_mesh(
     }
 
     /* Update mesh vertices */
-    memcpy(mesh->vertices, new_positions, mesh->vertex_count * sizeof(geomlib_vec3));
+    geomlib_memcpy(mesh->vertices, new_positions, mesh->vertex_count * sizeof(geomlib_vec3));
 
     /* Recompute normals */
     if (mesh->normals) {
@@ -121,9 +120,9 @@ int geomlib_smooth_mesh(
     }
 
     /* Cleanup */
-    free(new_positions);
-    free(temp_positions);
-    if (is_boundary) free(is_boundary);
+    geomlib_free(new_positions);
+    geomlib_free(temp_positions);
+    if (is_boundary) geomlib_free(is_boundary);
     geomlib_halfedge_free(&hemesh);
 
     return GEOMLIB_MESH_SUCCESS;
@@ -166,13 +165,13 @@ int geomlib_smooth_normals(
     int result = geomlib_halfedge_build(&hemesh, mesh);
     if (result != GEOMLIB_MESH_SUCCESS) return result;
 
-    geomlib_vec3 *new_normals = malloc(mesh->vertex_count * sizeof(geomlib_vec3));
-    memcpy(new_normals, mesh->normals, mesh->vertex_count * sizeof(geomlib_vec3));
+    geomlib_vec3 *new_normals = geomlib_malloc(mesh->vertex_count * sizeof(geomlib_vec3));
+    geomlib_memcpy(new_normals, mesh->normals, mesh->vertex_count * sizeof(geomlib_vec3));
 
     /* Smooth normals */
     for (int iter = 0; iter < iterations; iter++) {
-        geomlib_vec3 *temp_normals = malloc(mesh->vertex_count * sizeof(geomlib_vec3));
-        memcpy(temp_normals, new_normals, mesh->vertex_count * sizeof(geomlib_vec3));
+        geomlib_vec3 *temp_normals = geomlib_malloc(mesh->vertex_count * sizeof(geomlib_vec3));
+        geomlib_memcpy(temp_normals, new_normals, mesh->vertex_count * sizeof(geomlib_vec3));
 
         for (size_t v = 0; v < mesh->vertex_count; v++) {
             geomlib_vec3 sum = {0.0f, 0.0f, 0.0f};
@@ -196,11 +195,11 @@ int geomlib_smooth_normals(
             }
         }
 
-        free(temp_normals);
+        geomlib_free(temp_normals);
     }
 
-    memcpy(mesh->normals, new_normals, mesh->vertex_count * sizeof(geomlib_vec3));
-    free(new_normals);
+    geomlib_memcpy(mesh->normals, new_normals, mesh->vertex_count * sizeof(geomlib_vec3));
+    geomlib_free(new_normals);
     geomlib_halfedge_free(&hemesh);
 
     return GEOMLIB_MESH_SUCCESS;

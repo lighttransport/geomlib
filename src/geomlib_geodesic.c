@@ -3,18 +3,17 @@
  * Simplified heat method using iterative solvers
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_geodesic.h"
 #include "geomlib/geomlib_healing.h"
 #include "geomlib/geomlib_curvature.h"
-#include <stdlib.h>
-#include <math.h>
 #include <float.h>
-#include <string.h>
 
 /* Create geodesic distance structure */
 geomlib_geodesic_distances geomlib_geodesic_create(size_t vertex_count) {
     geomlib_geodesic_distances geo;
-    geo.distances = calloc(vertex_count, sizeof(float));
+    geo.distances = geomlib_calloc(vertex_count, sizeof(float));
     geo.vertex_count = vertex_count;
     geo.source_vertices = NULL;
     geo.source_count = 0;
@@ -25,11 +24,11 @@ geomlib_geodesic_distances geomlib_geodesic_create(size_t vertex_count) {
 void geomlib_geodesic_free(geomlib_geodesic_distances *geodesic) {
     if (!geodesic) return;
     if (geodesic->distances) {
-        free(geodesic->distances);
+        geomlib_free(geodesic->distances);
         geodesic->distances = NULL;
     }
     if (geodesic->source_vertices) {
-        free(geodesic->source_vertices);
+        geomlib_free(geodesic->source_vertices);
         geodesic->source_vertices = NULL;
     }
     geodesic->vertex_count = 0;
@@ -96,16 +95,16 @@ int geomlib_compute_geodesic_heat(
 
     /* Store source vertices */
     if (distances->source_vertices) {
-        free(distances->source_vertices);
+        geomlib_free(distances->source_vertices);
     }
-    distances->source_vertices = malloc(source_count * sizeof(uint32_t));
-    memcpy(distances->source_vertices, source_vertices, source_count * sizeof(uint32_t));
+    distances->source_vertices = geomlib_malloc(source_count * sizeof(uint32_t));
+    geomlib_memcpy(distances->source_vertices, source_vertices, source_count * sizeof(uint32_t));
     distances->source_count = source_count;
 
     /* Use simplified Dijkstra-like algorithm for geodesic distances */
     /* This is more accurate than the heat diffusion for small meshes */
 
-    bool *visited = calloc(mesh->vertex_count, sizeof(bool));
+    bool *visited = geomlib_calloc(mesh->vertex_count, sizeof(bool));
 
     /* Process vertices in order of increasing distance */
     for (size_t iter = 0; iter < mesh->vertex_count; iter++) {
@@ -147,7 +146,7 @@ int geomlib_compute_geodesic_heat(
         }
     }
 
-    free(visited);
+    geomlib_free(visited);
     geomlib_halfedge_free(&hemesh);
 
     return GEOMLIB_MESH_SUCCESS;
@@ -177,7 +176,7 @@ int geomlib_compute_geodesic_all_pairs(
 
     /* Allocate distance matrix */
     size_t n = mesh->vertex_count;
-    *distance_matrix = malloc(n * n * sizeof(float));
+    *distance_matrix = geomlib_malloc(n * n * sizeof(float));
     if (!*distance_matrix) {
         return GEOMLIB_MESH_ERROR_MEMORY;
     }
@@ -190,7 +189,7 @@ int geomlib_compute_geodesic_all_pairs(
         int result = geomlib_compute_geodesic_from_vertex(mesh, source, &geo);
 
         if (result != GEOMLIB_MESH_SUCCESS) {
-            free(*distance_matrix);
+            geomlib_free(*distance_matrix);
             *distance_matrix = NULL;
             geomlib_geodesic_free(&geo);
             return result;

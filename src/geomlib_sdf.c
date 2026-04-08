@@ -2,10 +2,9 @@
  * geomlib - Signed Distance Field Implementation
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_sdf.h"
-#include <stdlib.h>
-#include <string.h>
-#include <math.h>
 #include <float.h>
 #include <stdio.h>
 
@@ -312,7 +311,7 @@ geomlib_sdf geomlib_mesh_to_sdf(
     const geomlib_sdf_params *params
 ) {
     geomlib_sdf sdf;
-    memset(&sdf, 0, sizeof(geomlib_sdf));
+    geomlib_memset(&sdf, 0, sizeof(geomlib_sdf));
 
     /* Compute bounding box with padding */
     geomlib_aabb bbox = geomlib_trimesh_compute_aabb(mesh);
@@ -346,7 +345,7 @@ geomlib_sdf geomlib_mesh_to_sdf(
     sdf.total_voxels = (size_t)sdf.resolution[0] * sdf.resolution[1] * sdf.resolution[2];
 
     /* Allocate grid */
-    sdf.values = (float*)malloc(sdf.total_voxels * sizeof(float));
+    sdf.values = (float*)geomlib_malloc(sdf.total_voxels * sizeof(float));
 
     /* Build BVH if requested */
     geomlib_bvh bvh_data;
@@ -398,8 +397,8 @@ geomlib_sdf geomlib_mesh_to_sdf(
 }
 
 void geomlib_sdf_free(geomlib_sdf *sdf) {
-    free(sdf->values);
-    memset(sdf, 0, sizeof(geomlib_sdf));
+    geomlib_free(sdf->values);
+    geomlib_memset(sdf, 0, sizeof(geomlib_sdf));
 }
 
 /* ============================================================================
@@ -510,7 +509,7 @@ bool geomlib_sdf_is_inside(
 
 geomlib_sdf_stats geomlib_compute_sdf_stats(const geomlib_sdf *sdf) {
     geomlib_sdf_stats stats;
-    memset(&stats, 0, sizeof(geomlib_sdf_stats));
+    geomlib_memset(&stats, 0, sizeof(geomlib_sdf_stats));
 
     stats.min_distance = FLT_MAX;
     stats.max_distance = -FLT_MAX;
@@ -733,7 +732,7 @@ int geomlib_sdf_smooth(geomlib_sdf *sdf, float sigma) {
     }
 
     /* Allocate temporary buffer for smoothed values */
-    float *smoothed = (float*)malloc(sdf->total_voxels * sizeof(float));
+    float *smoothed = (float*)geomlib_malloc(sdf->total_voxels * sizeof(float));
     if (!smoothed) {
         return GEOMLIB_MESH_ERROR_INVALID;
     }
@@ -743,7 +742,7 @@ int geomlib_sdf_smooth(geomlib_sdf *sdf, float sigma) {
 
     /* Precompute 1D Gaussian kernel */
     int kernel_size = 2 * kernel_radius + 1;
-    float *kernel = (float*)malloc(kernel_size * sizeof(float));
+    float *kernel = (float*)geomlib_malloc(kernel_size * sizeof(float));
     float kernel_sum = 0.0f;
 
     for (int i = 0; i < kernel_size; i++) {
@@ -758,7 +757,7 @@ int geomlib_sdf_smooth(geomlib_sdf *sdf, float sigma) {
     }
 
     /* Apply separable 3D Gaussian filter */
-    float *temp = (float*)malloc(sdf->total_voxels * sizeof(float));
+    float *temp = (float*)geomlib_malloc(sdf->total_voxels * sizeof(float));
 
     /* 1. Smooth along X */
     for (uint32_t z = 0; z < sdf->resolution[2]; z++) {
@@ -830,11 +829,11 @@ int geomlib_sdf_smooth(geomlib_sdf *sdf, float sigma) {
     }
 
     /* Copy result back */
-    memcpy(sdf->values, temp, sdf->total_voxels * sizeof(float));
+    geomlib_memcpy(sdf->values, temp, sdf->total_voxels * sizeof(float));
 
-    free(kernel);
-    free(temp);
-    free(smoothed);
+    geomlib_free(kernel);
+    geomlib_free(temp);
+    geomlib_free(smoothed);
 
     return GEOMLIB_MESH_SUCCESS;
 }
@@ -861,7 +860,7 @@ geomlib_sdf geomlib_sdf_blend(
     float blend_factor
 ) {
     geomlib_sdf result;
-    memset(&result, 0, sizeof(geomlib_sdf));
+    geomlib_memset(&result, 0, sizeof(geomlib_sdf));
 
     /* Validate inputs */
     if (!sdf1 || !sdf2 || !sdf1->values || !sdf2->values) {
@@ -890,9 +889,9 @@ geomlib_sdf geomlib_sdf_blend(
     result.is_narrow_band = sdf1->is_narrow_band || sdf2->is_narrow_band;
     result.narrow_band_width = fmaxf(sdf1->narrow_band_width, sdf2->narrow_band_width);
 
-    result.values = (float*)malloc(result.total_voxels * sizeof(float));
+    result.values = (float*)geomlib_malloc(result.total_voxels * sizeof(float));
     if (!result.values) {
-        memset(&result, 0, sizeof(geomlib_sdf));
+        geomlib_memset(&result, 0, sizeof(geomlib_sdf));
         return result;
     }
 
@@ -1025,14 +1024,14 @@ int geomlib_sdf_load(geomlib_sdf *sdf, const char *filename) {
                        (size_t)sdf->resolution[2];
 
     /* Allocate and read distance values */
-    sdf->values = (float*)malloc(sdf->total_voxels * sizeof(float));
+    sdf->values = (float*)geomlib_malloc(sdf->total_voxels * sizeof(float));
     if (!sdf->values) {
         fclose(fp);
         return GEOMLIB_MESH_ERROR_INVALID;
     }
 
     if (fread(sdf->values, sizeof(float), sdf->total_voxels, fp) != sdf->total_voxels) {
-        free(sdf->values);
+        geomlib_free(sdf->values);
         sdf->values = NULL;
         fclose(fp);
         return GEOMLIB_MESH_ERROR_INVALID;

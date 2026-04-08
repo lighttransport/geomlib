@@ -5,11 +5,13 @@
  * BVH and Ray Tracing Implementation
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
+#ifndef GEOMLIB_FREESTANDING
+#include <stdlib.h> /* qsort, abs */
+#endif
 #include "geomlib/geomlib_bvh.h"
 #include "geomlib/geomlib_montecarlo.h"
-#include <math.h>
-#include <stdlib.h>
-#include <string.h>
 #include <float.h>
 
 #define GEOMLIB_BVH_MAX_PRIMS_IN_LEAF 4
@@ -223,7 +225,7 @@ static uint32_t build_bvh_recursive(
     if (bvh->node_count > bvh->node_capacity) {
         /* Expand node array */
         bvh->node_capacity *= 2;
-        bvh->nodes = (geomlib_bvh_node *)realloc(
+        bvh->nodes = (geomlib_bvh_node *)geomlib_realloc(
             bvh->nodes,
             sizeof(geomlib_bvh_node) * bvh->node_capacity
         );
@@ -276,7 +278,7 @@ static uint32_t build_bvh_recursive(
     if (quality >= GEOMLIB_BVH_QUALITY_MEDIUM && prim_count > GEOMLIB_BVH_MAX_PRIMS_IN_LEAF) {
         /* SAH split */
         sah_bucket buckets[GEOMLIB_BVH_SAH_BUCKETS];
-        memset(buckets, 0, sizeof(buckets));
+        geomlib_memset(buckets, 0, sizeof(buckets));
 
         /* Assign primitives to buckets */
         float centroid_min = (split_axis == 0) ? centroid_bounds.min.x :
@@ -399,8 +401,8 @@ int geomlib_bvh_build(
     bvh->node_count = 0;
     bvh->node_capacity = mesh->triangle_count * 2;  /* Estimate */
 
-    bvh->nodes = (geomlib_bvh_node *)malloc(sizeof(geomlib_bvh_node) * bvh->node_capacity);
-    bvh->primitive_indices = (uint32_t *)malloc(sizeof(uint32_t) * bvh->primitive_count);
+    bvh->nodes = (geomlib_bvh_node *)geomlib_malloc(sizeof(geomlib_bvh_node) * bvh->node_capacity);
+    bvh->primitive_indices = (uint32_t *)geomlib_malloc(sizeof(uint32_t) * bvh->primitive_count);
 
     if (!bvh->nodes || !bvh->primitive_indices) {
         geomlib_bvh_free(bvh);
@@ -408,7 +410,7 @@ int geomlib_bvh_build(
     }
 
     /* Build primitive info array */
-    bvh_primitive_info *primitives = (bvh_primitive_info *)malloc(
+    bvh_primitive_info *primitives = (bvh_primitive_info *)geomlib_malloc(
         sizeof(bvh_primitive_info) * mesh->triangle_count
     );
 
@@ -431,15 +433,15 @@ int geomlib_bvh_build(
         bvh->primitive_indices[i] = primitives[i].primitive_index;
     }
 
-    free(primitives);
+    geomlib_free(primitives);
 
     return GEOMLIB_MESH_SUCCESS;
 }
 
 void geomlib_bvh_free(geomlib_bvh *bvh) {
     if (bvh) {
-        free(bvh->nodes);
-        free(bvh->primitive_indices);
+        geomlib_free(bvh->nodes);
+        geomlib_free(bvh->primitive_indices);
         bvh->nodes = NULL;
         bvh->primitive_indices = NULL;
         bvh->node_count = 0;

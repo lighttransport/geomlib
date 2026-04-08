@@ -2,11 +2,10 @@
  * geomlib - Hole Filling Implementation
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_holefill.h"
 #include "geomlib/geomlib_smoothing.h"
-#include <stdlib.h>
-#include <string.h>
-#include <math.h>
 #include <float.h>
 
 /* ============================================================================
@@ -21,7 +20,7 @@ geomlib_holes geomlib_detect_holes(const geomlib_trimesh *mesh) {
 
     /* Convert loops to holes */
     result.hole_count = loops.loop_count;
-    result.holes = (geomlib_hole*)malloc(result.hole_count * sizeof(geomlib_hole));
+    result.holes = (geomlib_hole*)geomlib_malloc(result.hole_count * sizeof(geomlib_hole));
 
     for (size_t i = 0; i < loops.loop_count; i++) {
         result.holes[i] = geomlib_classify_hole(mesh, &loops.loops[i]);
@@ -34,9 +33,9 @@ geomlib_holes geomlib_detect_holes(const geomlib_trimesh *mesh) {
 
 void geomlib_holes_free(geomlib_holes *holes) {
     for (size_t i = 0; i < holes->hole_count; i++) {
-        free(holes->holes[i].boundary_vertices);
+        geomlib_free(holes->holes[i].boundary_vertices);
     }
-    free(holes->holes);
+    geomlib_free(holes->holes);
 }
 
 geomlib_vec3 geomlib_hole_centroid(
@@ -162,8 +161,8 @@ geomlib_hole geomlib_classify_hole(
 
     /* Copy boundary */
     hole.vertex_count = loop->vertex_count;
-    hole.boundary_vertices = (uint32_t*)malloc(loop->vertex_count * sizeof(uint32_t));
-    memcpy(hole.boundary_vertices, loop->vertices, loop->vertex_count * sizeof(uint32_t));
+    hole.boundary_vertices = (uint32_t*)geomlib_malloc(loop->vertex_count * sizeof(uint32_t));
+    geomlib_memcpy(hole.boundary_vertices, loop->vertices, loop->vertex_count * sizeof(uint32_t));
 
     hole.perimeter = loop->length;
 
@@ -244,7 +243,7 @@ int geomlib_ear_clipping(
         return GEOMLIB_MESH_SUCCESS;
     }
 
-    bool *active = (bool*)malloc(point_count * sizeof(bool));
+    bool *active = (bool*)geomlib_malloc(point_count * sizeof(bool));
     for (size_t i = 0; i < point_count; i++) {
         active[i] = true;
     }
@@ -331,7 +330,7 @@ int geomlib_ear_clipping(
     }
 
     *triangle_count = tri_count;
-    free(active);
+    geomlib_free(active);
 
     return GEOMLIB_MESH_SUCCESS;
 }
@@ -365,7 +364,7 @@ int geomlib_fill_tangent_plane(
     tangent2 = geomlib_vec3_cross(normal, tangent1);
 
     /* Project to 2D */
-    geomlib_vec2 *points_2d = (geomlib_vec2*)malloc(hole->vertex_count * sizeof(geomlib_vec2));
+    geomlib_vec2 *points_2d = (geomlib_vec2*)geomlib_malloc(hole->vertex_count * sizeof(geomlib_vec2));
     for (size_t i = 0; i < hole->vertex_count; i++) {
         geomlib_vec3 v = mesh->vertices[hole->boundary_vertices[i]];
         geomlib_vec3 d = geomlib_vec3_sub(v, origin);
@@ -375,15 +374,15 @@ int geomlib_fill_tangent_plane(
 
     /* Triangulate in 2D */
     size_t max_triangles = hole->vertex_count - 2;
-    uint32_t *local_triangles = (uint32_t*)malloc(max_triangles * 3 * sizeof(uint32_t));
+    uint32_t *local_triangles = (uint32_t*)geomlib_malloc(max_triangles * 3 * sizeof(uint32_t));
     size_t triangle_count;
 
     int result = geomlib_ear_clipping(points_2d, hole->vertex_count,
                                        local_triangles, &triangle_count);
 
     if (result != GEOMLIB_MESH_SUCCESS) {
-        free(points_2d);
-        free(local_triangles);
+        geomlib_free(points_2d);
+        geomlib_free(local_triangles);
         return result;
     }
 
@@ -394,7 +393,7 @@ int geomlib_fill_tangent_plane(
     /* Reallocate if needed */
     if (new_triangle_count > mesh->triangle_capacity) {
         mesh->triangle_capacity = new_triangle_count * 2;
-        mesh->indices = (uint32_t*)realloc(mesh->indices,
+        mesh->indices = (uint32_t*)geomlib_realloc(mesh->indices,
             mesh->triangle_capacity * 3 * sizeof(uint32_t));
     }
 
@@ -410,8 +409,8 @@ int geomlib_fill_tangent_plane(
 
     mesh->triangle_count = new_triangle_count;
 
-    free(points_2d);
-    free(local_triangles);
+    geomlib_free(points_2d);
+    geomlib_free(local_triangles);
 
     return GEOMLIB_MESH_SUCCESS;
 }
@@ -492,9 +491,9 @@ int geomlib_fill_advancing_front(
 
     /* Build active front (list of boundary edges) */
     size_t front_capacity = hole->vertex_count * 2;
-    uint32_t *front_v0 = (uint32_t*)malloc(front_capacity * sizeof(uint32_t));
-    uint32_t *front_v1 = (uint32_t*)malloc(front_capacity * sizeof(uint32_t));
-    bool *front_active = (bool*)calloc(front_capacity, sizeof(bool));
+    uint32_t *front_v0 = (uint32_t*)geomlib_malloc(front_capacity * sizeof(uint32_t));
+    uint32_t *front_v1 = (uint32_t*)geomlib_malloc(front_capacity * sizeof(uint32_t));
+    bool *front_active = (bool*)geomlib_calloc(front_capacity, sizeof(bool));
 
     /* Initialize front with boundary edges */
     size_t front_count = 0;
@@ -506,8 +505,8 @@ int geomlib_fill_advancing_front(
     }
 
     /* Track which boundary vertices are available */
-    bool *is_boundary = (bool*)calloc(mesh->vertex_count, sizeof(bool));
-    bool *is_used = (bool*)calloc(mesh->vertex_count, sizeof(bool));
+    bool *is_boundary = (bool*)geomlib_calloc(mesh->vertex_count, sizeof(bool));
+    bool *is_used = (bool*)geomlib_calloc(mesh->vertex_count, sizeof(bool));
 
     for (size_t i = 0; i < hole->vertex_count; i++) {
         is_boundary[hole->boundary_vertices[i]] = true;
@@ -619,11 +618,11 @@ int geomlib_fill_advancing_front(
     }
 
     /* Cleanup */
-    free(front_v0);
-    free(front_v1);
-    free(front_active);
-    free(is_boundary);
-    free(is_used);
+    geomlib_free(front_v0);
+    geomlib_free(front_v1);
+    geomlib_free(front_active);
+    geomlib_free(is_boundary);
+    geomlib_free(is_used);
 
     /* Apply smoothing if requested */
     if (params->fair_interior && params->smooth_iterations > 0) {

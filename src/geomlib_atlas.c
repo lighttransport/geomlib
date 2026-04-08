@@ -2,11 +2,10 @@
  * geomlib - Texture Atlas Generation Implementation
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_atlas.h"
 #include "geomlib/geomlib_healing.h"
-#include <stdlib.h>
-#include <string.h>
-#include <math.h>
 #include <float.h>
 
 #ifndef M_PI
@@ -37,7 +36,7 @@ geomlib_atlas_params geomlib_atlas_params_default(void) {
 /* Create atlas */
 geomlib_atlas geomlib_atlas_create(size_t max_charts) {
     geomlib_atlas atlas;
-    atlas.charts = malloc(max_charts * sizeof(geomlib_atlas_chart));
+    atlas.charts = geomlib_malloc(max_charts * sizeof(geomlib_atlas_chart));
     atlas.chart_count = 0;
     atlas.uvs = NULL;
     atlas.uv_count = 0;
@@ -52,14 +51,14 @@ void geomlib_atlas_free(geomlib_atlas *atlas) {
     if (!atlas) return;
 
     for (size_t i = 0; i < atlas->chart_count; i++) {
-        free(atlas->charts[i].triangles);
-        free(atlas->charts[i].uvs);
-        free(atlas->charts[i].vertex_map);
+        geomlib_free(atlas->charts[i].triangles);
+        geomlib_free(atlas->charts[i].uvs);
+        geomlib_free(atlas->charts[i].vertex_map);
     }
-    free(atlas->charts);
-    free(atlas->uvs);
+    geomlib_free(atlas->charts);
+    geomlib_free(atlas->uvs);
 
-    memset(atlas, 0, sizeof(geomlib_atlas));
+    geomlib_memset(atlas, 0, sizeof(geomlib_atlas));
 }
 
 /* Helper: Triangle normal */
@@ -95,7 +94,7 @@ static int segment_by_normals(
     if (!mesh || !atlas) return GEOMLIB_MESH_ERROR_INVALID;
 
     /* Compute triangle normals */
-    geomlib_vec3 *tri_normals = malloc(mesh->triangle_count * sizeof(geomlib_vec3));
+    geomlib_vec3 *tri_normals = geomlib_malloc(mesh->triangle_count * sizeof(geomlib_vec3));
     for (size_t t = 0; t < mesh->triangle_count; t++) {
         uint32_t i0 = mesh->indices[t * 3 + 0];
         uint32_t i1 = mesh->indices[t * 3 + 1];
@@ -108,7 +107,7 @@ static int segment_by_normals(
     }
 
     /* Simple greedy clustering */
-    bool *assigned = calloc(mesh->triangle_count, sizeof(bool));
+    bool *assigned = geomlib_calloc(mesh->triangle_count, sizeof(bool));
     float cos_threshold = cosf(params->normal_threshold * M_PI / 180.0f);
 
     atlas->chart_count = 0;
@@ -118,11 +117,11 @@ static int segment_by_normals(
 
         /* Start new chart */
         geomlib_atlas_chart *chart = &atlas->charts[atlas->chart_count];
-        chart->triangles = malloc(mesh->triangle_count * sizeof(uint32_t));
+        chart->triangles = geomlib_malloc(mesh->triangle_count * sizeof(uint32_t));
         chart->triangle_count = 0;
 
         /* Grow chart from seed */
-        uint32_t *queue = malloc(mesh->triangle_count * sizeof(uint32_t));
+        uint32_t *queue = geomlib_malloc(mesh->triangle_count * sizeof(uint32_t));
         size_t queue_size = 0;
         queue[queue_size++] = seed;
         assigned[seed] = true;
@@ -162,14 +161,14 @@ static int segment_by_normals(
             }
         }
 
-        free(queue);
+        geomlib_free(queue);
         atlas->chart_count++;
 
         if (atlas->chart_count >= 256) break;  /* Reasonable chart limit */
     }
 
-    free(assigned);
-    free(tri_normals);
+    geomlib_free(assigned);
+    geomlib_free(tri_normals);
 
     return GEOMLIB_MESH_SUCCESS;
 }
@@ -184,7 +183,7 @@ static int parameterize_chart(
     geomlib_trimesh chart_mesh;
 
     /* Collect unique vertices */
-    bool *vertex_used = calloc(mesh->vertex_count, sizeof(bool));
+    bool *vertex_used = geomlib_calloc(mesh->vertex_count, sizeof(bool));
     for (size_t t = 0; t < chart->triangle_count; t++) {
         uint32_t tri_idx = chart->triangles[t];
         vertex_used[mesh->indices[tri_idx * 3 + 0]] = true;
@@ -199,8 +198,8 @@ static int parameterize_chart(
     }
 
     chart->vertex_count = vertex_count;
-    chart->vertex_map = malloc(vertex_count * sizeof(uint32_t));
-    uint32_t *vertex_remap = malloc(mesh->vertex_count * sizeof(uint32_t));
+    chart->vertex_map = geomlib_malloc(vertex_count * sizeof(uint32_t));
+    uint32_t *vertex_remap = geomlib_malloc(mesh->vertex_count * sizeof(uint32_t));
 
     size_t v_idx = 0;
     for (size_t v = 0; v < mesh->vertex_count; v++) {
@@ -239,8 +238,8 @@ static int parameterize_chart(
 
     if (result == GEOMLIB_MESH_SUCCESS && uv_coords.uvs) {
         /* Copy UVs */
-        chart->uvs = malloc(vertex_count * sizeof(geomlib_vec2));
-        memcpy(chart->uvs, uv_coords.uvs, vertex_count * sizeof(geomlib_vec2));
+        chart->uvs = geomlib_malloc(vertex_count * sizeof(geomlib_vec2));
+        geomlib_memcpy(chart->uvs, uv_coords.uvs, vertex_count * sizeof(geomlib_vec2));
 
         /* Compute bounding box */
         chart->uv_min = (geomlib_vec2){FLT_MAX, FLT_MAX};
@@ -255,11 +254,11 @@ static int parameterize_chart(
         }
     }
 
-    free(vertex_used);
-    free(vertex_remap);
+    geomlib_free(vertex_used);
+    geomlib_free(vertex_remap);
     geomlib_trimesh_free(&chart_mesh);
-    if (uv_coords.uvs) free(uv_coords.uvs);
-    if (uv_coords.distortion) free(uv_coords.distortion);
+    if (uv_coords.uvs) geomlib_free(uv_coords.uvs);
+    if (uv_coords.distortion) geomlib_free(uv_coords.distortion);
 
     return result;
 }
@@ -280,7 +279,7 @@ int geomlib_atlas_segment_mesh(
         default:
             /* Fallback: single chart */
             atlas->chart_count = 1;
-            atlas->charts[0].triangles = malloc(mesh->triangle_count * sizeof(uint32_t));
+            atlas->charts[0].triangles = geomlib_malloc(mesh->triangle_count * sizeof(uint32_t));
             atlas->charts[0].triangle_count = mesh->triangle_count;
             for (size_t t = 0; t < mesh->triangle_count; t++) {
                 atlas->charts[0].triangles[t] = t;
@@ -384,7 +383,7 @@ int geomlib_atlas_apply_to_mesh(
 
     /* Allocate UV array */
     if (!mesh->texcoords) {
-        mesh->texcoords = malloc(mesh->vertex_count * sizeof(geomlib_vec2));
+        mesh->texcoords = geomlib_malloc(mesh->vertex_count * sizeof(geomlib_vec2));
     }
 
     /* Apply each chart's UVs */

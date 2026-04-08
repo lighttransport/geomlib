@@ -2,10 +2,9 @@
  * geomlib - Feature Detection Implementation
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_feature.h"
-#include <stdlib.h>
-#include <string.h>
-#include <math.h>
 #include <float.h>
 
 #ifndef M_PI
@@ -138,7 +137,7 @@ geomlib_feature_edge* geomlib_detect_sharp_edges(
     geomlib_edge_mesh edges = geomlib_build_edge_mesh(mesh);
 
     /* Allocate space for feature edges */
-    geomlib_feature_edge *feature_edges = (geomlib_feature_edge*)malloc(
+    geomlib_feature_edge *feature_edges = (geomlib_feature_edge*)geomlib_malloc(
         edges.edge_count * sizeof(geomlib_feature_edge));
     size_t feature_count = 0;
 
@@ -188,7 +187,7 @@ geomlib_feature_edge* geomlib_mark_boundary_features(
     }
 
     /* Allocate and fill boundary features */
-    geomlib_feature_edge *boundary_edges = (geomlib_feature_edge*)malloc(
+    geomlib_feature_edge *boundary_edges = (geomlib_feature_edge*)geomlib_malloc(
         boundary_count * sizeof(geomlib_feature_edge));
 
     size_t idx = 0;
@@ -252,7 +251,7 @@ geomlib_feature_edge* geomlib_detect_ridges_valleys(
 ) {
     geomlib_edge_mesh edges = geomlib_build_edge_mesh(mesh);
 
-    geomlib_feature_edge *feature_edges = (geomlib_feature_edge*)malloc(
+    geomlib_feature_edge *feature_edges = (geomlib_feature_edge*)geomlib_malloc(
         edges.edge_count * sizeof(geomlib_feature_edge));
     size_t feature_count = 0;
 
@@ -314,7 +313,7 @@ void geomlib_get_feature_edges_at_vertex(
 ) {
     uint32_t count = geomlib_count_feature_edges_at_vertex(edges, edge_count, vertex_index);
 
-    *vertex_edges = (geomlib_feature_edge*)malloc(count * sizeof(geomlib_feature_edge));
+    *vertex_edges = (geomlib_feature_edge*)geomlib_malloc(count * sizeof(geomlib_feature_edge));
     *vertex_edge_count = count;
 
     size_t idx = 0;
@@ -344,8 +343,8 @@ geomlib_feature_vertex* geomlib_detect_corners(
     size_t *corner_count
 ) {
     /* Find unique vertices in feature edges */
-    bool *is_feature_vertex = (bool*)calloc(mesh->vertex_count, sizeof(bool));
-    uint32_t *edge_counts = (uint32_t*)calloc(mesh->vertex_count, sizeof(uint32_t));
+    bool *is_feature_vertex = (bool*)geomlib_calloc(mesh->vertex_count, sizeof(bool));
+    uint32_t *edge_counts = (uint32_t*)geomlib_calloc(mesh->vertex_count, sizeof(uint32_t));
 
     for (size_t i = 0; i < edge_count; i++) {
         is_feature_vertex[feature_edges[i].v0] = true;
@@ -363,7 +362,7 @@ geomlib_feature_vertex* geomlib_detect_corners(
     }
 
     /* Allocate and fill corners */
-    geomlib_feature_vertex *corners = (geomlib_feature_vertex*)malloc(
+    geomlib_feature_vertex *corners = (geomlib_feature_vertex*)geomlib_malloc(
         count * sizeof(geomlib_feature_vertex));
 
     size_t idx = 0;
@@ -387,8 +386,8 @@ geomlib_feature_vertex* geomlib_detect_corners(
         }
     }
 
-    free(is_feature_vertex);
-    free(edge_counts);
+    geomlib_free(is_feature_vertex);
+    geomlib_free(edge_counts);
 
     *corner_count = count;
     return corners;
@@ -453,18 +452,18 @@ int geomlib_extract_feature_curves(
         return GEOMLIB_MESH_SUCCESS;
     }
 
-    bool *visited = (bool*)calloc(edge_count, sizeof(bool));
+    bool *visited = (bool*)geomlib_calloc(edge_count, sizeof(bool));
 
     /* Temporary storage */
-    uint32_t **temp_curves = (uint32_t**)malloc(edge_count * sizeof(uint32_t*));
-    size_t *temp_lengths = (size_t*)malloc(edge_count * sizeof(size_t));
+    uint32_t **temp_curves = (uint32_t**)geomlib_malloc(edge_count * sizeof(uint32_t*));
+    size_t *temp_lengths = (size_t*)geomlib_malloc(edge_count * sizeof(size_t));
     size_t num_curves = 0;
 
     /* Start from each unvisited edge */
     for (size_t i = 0; i < edge_count; i++) {
         if (visited[i]) continue;
 
-        uint32_t *curve = (uint32_t*)malloc(edge_count * 2 * sizeof(uint32_t));
+        uint32_t *curve = (uint32_t*)geomlib_malloc(edge_count * 2 * sizeof(uint32_t));
         size_t length;
 
         visited[i] = true;
@@ -476,7 +475,7 @@ int geomlib_extract_feature_curves(
         num_curves++;
     }
 
-    free(visited);
+    geomlib_free(visited);
 
     *curves = temp_curves;
     *curve_lengths = temp_lengths;
@@ -494,7 +493,7 @@ geomlib_features geomlib_detect_features(
     const geomlib_feature_params *params
 ) {
     geomlib_features features;
-    memset(&features, 0, sizeof(geomlib_features));
+    geomlib_memset(&features, 0, sizeof(geomlib_features));
 
     /* Detect sharp edges */
     size_t sharp_count = 0;
@@ -510,18 +509,18 @@ geomlib_features geomlib_detect_features(
 
     /* Combine all edges */
     size_t total_edges = sharp_count + boundary_count;
-    features.edges = (geomlib_feature_edge*)malloc(
+    features.edges = (geomlib_feature_edge*)geomlib_malloc(
         total_edges * sizeof(geomlib_feature_edge));
     features.edge_count = total_edges;
 
-    memcpy(features.edges, sharp_edges, sharp_count * sizeof(geomlib_feature_edge));
+    geomlib_memcpy(features.edges, sharp_edges, sharp_count * sizeof(geomlib_feature_edge));
     if (boundary_count > 0) {
-        memcpy(features.edges + sharp_count, boundary_edges,
+        geomlib_memcpy(features.edges + sharp_count, boundary_edges,
                boundary_count * sizeof(geomlib_feature_edge));
     }
 
-    free(sharp_edges);
-    free(boundary_edges);
+    geomlib_free(sharp_edges);
+    geomlib_free(boundary_edges);
 
     /* Detect corners if requested */
     if (params->detect_corners) {
@@ -539,16 +538,16 @@ geomlib_features geomlib_detect_features(
 }
 
 void geomlib_features_free(geomlib_features *features) {
-    free(features->edges);
-    free(features->vertices);
+    geomlib_free(features->edges);
+    geomlib_free(features->vertices);
 
     for (size_t i = 0; i < features->curve_count; i++) {
-        free(features->curves[i]);
+        geomlib_free(features->curves[i]);
     }
-    free(features->curves);
-    free(features->curve_lengths);
+    geomlib_free(features->curves);
+    geomlib_free(features->curve_lengths);
 
-    memset(features, 0, sizeof(geomlib_features));
+    geomlib_memset(features, 0, sizeof(geomlib_features));
 }
 
 /* ============================================================================
@@ -561,10 +560,10 @@ geomlib_regions geomlib_segment_planar_regions(
     float distance_threshold
 ) {
     geomlib_regions regions;
-    memset(&regions, 0, sizeof(geomlib_regions));
+    geomlib_memset(&regions, 0, sizeof(geomlib_regions));
 
     /* Simple region growing */
-    regions.triangle_labels = (uint32_t*)malloc(mesh->triangle_count * sizeof(uint32_t));
+    regions.triangle_labels = (uint32_t*)geomlib_malloc(mesh->triangle_count * sizeof(uint32_t));
     for (size_t i = 0; i < mesh->triangle_count; i++) {
         regions.triangle_labels[i] = UINT32_MAX;  /* Unlabeled */
     }
@@ -573,7 +572,7 @@ geomlib_regions geomlib_segment_planar_regions(
     geomlib_edge_mesh edges = geomlib_build_edge_mesh(mesh);
 
     /* Compute triangle normals */
-    geomlib_vec3 *triangle_normals = (geomlib_vec3*)malloc(mesh->triangle_count * sizeof(geomlib_vec3));
+    geomlib_vec3 *triangle_normals = (geomlib_vec3*)geomlib_malloc(mesh->triangle_count * sizeof(geomlib_vec3));
     for (size_t i = 0; i < mesh->triangle_count; i++) {
         geomlib_vec3 v0 = mesh->vertices[mesh->indices[i * 3 + 0]];
         geomlib_vec3 v1 = mesh->vertices[mesh->indices[i * 3 + 1]];
@@ -585,7 +584,7 @@ geomlib_regions geomlib_segment_planar_regions(
     }
 
     /* Allocate temp regions */
-    geomlib_planar_region *temp_regions = (geomlib_planar_region*)malloc(
+    geomlib_planar_region *temp_regions = (geomlib_planar_region*)geomlib_malloc(
         mesh->triangle_count * sizeof(geomlib_planar_region));
     size_t region_count = 0;
 
@@ -594,7 +593,7 @@ geomlib_regions geomlib_segment_planar_regions(
     float cos_threshold = cosf(angle_threshold_rad);
 
     /* Queue for region growing */
-    uint32_t *queue = (uint32_t*)malloc(mesh->triangle_count * sizeof(uint32_t));
+    uint32_t *queue = (uint32_t*)geomlib_malloc(mesh->triangle_count * sizeof(uint32_t));
 
     /* Region growing algorithm */
     for (size_t seed = 0; seed < mesh->triangle_count; seed++) {
@@ -608,7 +607,7 @@ geomlib_regions geomlib_segment_planar_regions(
         size_t queue_tail = 0;
 
         /* Temporary triangle list for this region */
-        uint32_t *region_triangles = (uint32_t*)malloc(mesh->triangle_count * sizeof(uint32_t));
+        uint32_t *region_triangles = (uint32_t*)geomlib_malloc(mesh->triangle_count * sizeof(uint32_t));
         size_t region_tri_count = 0;
 
         /* Add seed to queue */
@@ -655,7 +654,7 @@ geomlib_regions geomlib_segment_planar_regions(
         }
 
         /* Store region */
-        temp_regions[region_count].triangles = (uint32_t*)realloc(region_triangles,
+        temp_regions[region_count].triangles = (uint32_t*)geomlib_realloc(region_triangles,
             region_tri_count * sizeof(uint32_t));
         temp_regions[region_count].triangle_count = region_tri_count;
 
@@ -709,11 +708,11 @@ geomlib_regions geomlib_segment_planar_regions(
     }
 
     /* Cleanup */
-    free(queue);
-    free(triangle_normals);
+    geomlib_free(queue);
+    geomlib_free(triangle_normals);
     geomlib_edge_mesh_free(&edges);
 
-    regions.regions = (geomlib_planar_region*)realloc(temp_regions,
+    regions.regions = (geomlib_planar_region*)geomlib_realloc(temp_regions,
         region_count * sizeof(geomlib_planar_region));
     regions.region_count = region_count;
 
@@ -722,11 +721,11 @@ geomlib_regions geomlib_segment_planar_regions(
 
 void geomlib_regions_free(geomlib_regions *regions) {
     for (size_t i = 0; i < regions->region_count; i++) {
-        free(regions->regions[i].triangles);
+        geomlib_free(regions->regions[i].triangles);
     }
-    free(regions->regions);
-    free(regions->triangle_labels);
-    memset(regions, 0, sizeof(geomlib_regions));
+    geomlib_free(regions->regions);
+    geomlib_free(regions->triangle_labels);
+    geomlib_memset(regions, 0, sizeof(geomlib_regions));
 }
 
 /* ============================================================================
@@ -737,7 +736,7 @@ geomlib_feature_stats geomlib_compute_feature_stats(
     const geomlib_features *features
 ) {
     geomlib_feature_stats stats;
-    memset(&stats, 0, sizeof(geomlib_feature_stats));
+    geomlib_memset(&stats, 0, sizeof(geomlib_feature_stats));
 
     stats.corner_count = features->vertex_count;
 

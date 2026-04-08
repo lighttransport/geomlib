@@ -61,3 +61,4 @@ web/build/
 web/demo/public/*.wasm
 web/demo/public/*.js
 !web/demo/public/index.html
+build_fresh/

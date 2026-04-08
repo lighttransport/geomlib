@@ -3,13 +3,12 @@
  * Based on LSCM (Lévy et al. 2002) and harmonic mapping
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_parameterization.h"
 #include "geomlib/geomlib_healing.h"
 #include "geomlib/geomlib_solver.h"
-#include <stdlib.h>
 #include <stdbool.h>
-#include <string.h>
-#include <math.h>
 #include <float.h>
 
 #ifndef M_PI
@@ -32,7 +31,7 @@ int geomlib_find_boundary_loop(
     if (result != GEOMLIB_MESH_SUCCESS) return result;
 
     /* Find boundary half-edges (those without twins) */
-    uint32_t *boundary = malloc(mesh->vertex_count * sizeof(uint32_t));
+    uint32_t *boundary = geomlib_malloc(mesh->vertex_count * sizeof(uint32_t));
     size_t count = 0;
 
     /* Find a boundary half-edge */
@@ -46,7 +45,7 @@ int geomlib_find_boundary_loop(
 
     if (start_he == UINT32_MAX) {
         /* No boundary found - closed mesh */
-        free(boundary);
+        geomlib_free(boundary);
         geomlib_halfedge_free(&hemesh);
         *boundary_vertices = NULL;
         *boundary_count = 0;
@@ -151,7 +150,7 @@ int geomlib_parameterize_harmonic(
     }
 
     /* Initialize UVs */
-    memset(uvs->uvs, 0, mesh->vertex_count * sizeof(geomlib_vec2));
+    geomlib_memset(uvs->uvs, 0, mesh->vertex_count * sizeof(geomlib_vec2));
 
     /* Pin boundary */
     if (boundary == GEOMLIB_BOUNDARY_CIRCLE) {
@@ -161,7 +160,7 @@ int geomlib_parameterize_harmonic(
     }
 
     /* Mark boundary vertices */
-    bool *is_boundary = calloc(mesh->vertex_count, sizeof(bool));
+    bool *is_boundary = geomlib_calloc(mesh->vertex_count, sizeof(bool));
     for (size_t i = 0; i < boundary_count; i++) {
         is_boundary[boundary_verts[i]] = true;
     }
@@ -170,14 +169,14 @@ int geomlib_parameterize_harmonic(
     geomlib_halfedge_mesh hemesh;
     result = geomlib_halfedge_build(&hemesh, mesh);
     if (result != GEOMLIB_MESH_SUCCESS) {
-        free(boundary_verts);
-        free(is_boundary);
+        geomlib_free(boundary_verts);
+        geomlib_free(is_boundary);
         return result;
     }
 
     /* Solve using simple Jacobi iteration */
     /* Each interior vertex = average of its neighbors */
-    geomlib_vec2 *uvs_new = malloc(mesh->vertex_count * sizeof(geomlib_vec2));
+    geomlib_vec2 *uvs_new = geomlib_malloc(mesh->vertex_count * sizeof(geomlib_vec2));
 
     const int max_iterations = 1000;
     const float tolerance = 1e-6f;
@@ -224,7 +223,7 @@ int geomlib_parameterize_harmonic(
         }
 
         /* Copy new values */
-        memcpy(uvs->uvs, uvs_new, mesh->vertex_count * sizeof(geomlib_vec2));
+        geomlib_memcpy(uvs->uvs, uvs_new, mesh->vertex_count * sizeof(geomlib_vec2));
 
         /* Check convergence */
         if (max_change < tolerance) {
@@ -233,9 +232,9 @@ int geomlib_parameterize_harmonic(
     }
 
     /* Cleanup */
-    free(uvs_new);
-    free(is_boundary);
-    free(boundary_verts);
+    geomlib_free(uvs_new);
+    geomlib_free(is_boundary);
+    geomlib_free(boundary_verts);
     geomlib_halfedge_free(&hemesh);
 
     return GEOMLIB_MESH_SUCCESS;
@@ -307,7 +306,7 @@ int geomlib_parameterize_lscm(
     }
 
     /* Initialize UVs */
-    memset(uvs->uvs, 0, mesh->vertex_count * sizeof(geomlib_vec2));
+    geomlib_memset(uvs->uvs, 0, mesh->vertex_count * sizeof(geomlib_vec2));
 
     /* Pin boundary */
     if (boundary == GEOMLIB_BOUNDARY_CIRCLE) {
@@ -317,7 +316,7 @@ int geomlib_parameterize_lscm(
     }
 
     /* Mark boundary vertices */
-    bool *is_boundary = calloc(mesh->vertex_count, sizeof(bool));
+    bool *is_boundary = geomlib_calloc(mesh->vertex_count, sizeof(bool));
     for (size_t i = 0; i < boundary_count; i++) {
         is_boundary[boundary_verts[i]] = true;
     }
@@ -326,13 +325,13 @@ int geomlib_parameterize_lscm(
     geomlib_halfedge_mesh hemesh;
     result = geomlib_halfedge_build(&hemesh, mesh);
     if (result != GEOMLIB_MESH_SUCCESS) {
-        free(boundary_verts);
-        free(is_boundary);
+        geomlib_free(boundary_verts);
+        geomlib_free(is_boundary);
         return result;
     }
 
     /* LSCM iterative solver using conformal weights */
-    geomlib_vec2 *uvs_new = malloc(mesh->vertex_count * sizeof(geomlib_vec2));
+    geomlib_vec2 *uvs_new = geomlib_malloc(mesh->vertex_count * sizeof(geomlib_vec2));
 
     const int max_iterations = 1000;
     const float tolerance = 1e-6f;
@@ -409,7 +408,7 @@ int geomlib_parameterize_lscm(
         }
 
         /* Copy new values */
-        memcpy(uvs->uvs, uvs_new, mesh->vertex_count * sizeof(geomlib_vec2));
+        geomlib_memcpy(uvs->uvs, uvs_new, mesh->vertex_count * sizeof(geomlib_vec2));
 
         /* Check convergence */
         if (max_change < tolerance) {
@@ -418,9 +417,9 @@ int geomlib_parameterize_lscm(
     }
 
     /* Cleanup */
-    free(uvs_new);
-    free(is_boundary);
-    free(boundary_verts);
+    geomlib_free(uvs_new);
+    geomlib_free(is_boundary);
+    geomlib_free(boundary_verts);
     geomlib_halfedge_free(&hemesh);
 
     return GEOMLIB_MESH_SUCCESS;
@@ -494,9 +493,9 @@ void geomlib_normalize_uvs(geomlib_uv_coords *uvs) {
 /* UV coordinates management */
 geomlib_uv_coords geomlib_uv_coords_create(size_t vertex_count, size_t triangle_count) {
     geomlib_uv_coords uvs;
-    uvs.uvs = calloc(vertex_count, sizeof(geomlib_vec2));
+    uvs.uvs = geomlib_calloc(vertex_count, sizeof(geomlib_vec2));
     uvs.vertex_count = vertex_count;
-    uvs.distortion = triangle_count > 0 ? calloc(triangle_count, sizeof(float)) : NULL;
+    uvs.distortion = triangle_count > 0 ? geomlib_calloc(triangle_count, sizeof(float)) : NULL;
     uvs.triangle_count = triangle_count;
     return uvs;
 }
@@ -504,11 +503,11 @@ geomlib_uv_coords geomlib_uv_coords_create(size_t vertex_count, size_t triangle_
 void geomlib_uv_coords_free(geomlib_uv_coords *uvs) {
     if (!uvs) return;
     if (uvs->uvs) {
-        free(uvs->uvs);
+        geomlib_free(uvs->uvs);
         uvs->uvs = NULL;
     }
     if (uvs->distortion) {
-        free(uvs->distortion);
+        geomlib_free(uvs->distortion);
         uvs->distortion = NULL;
     }
     uvs->vertex_count = 0;
@@ -560,7 +559,7 @@ void geomlib_compute_param_stats(
 ) {
     if (!mesh || !uvs || !stats) return;
 
-    memset(stats, 0, sizeof(geomlib_param_stats));
+    geomlib_memset(stats, 0, sizeof(geomlib_param_stats));
 
     float angle_error_sum = 0.0f;
     float area_error_sum = 0.0f;

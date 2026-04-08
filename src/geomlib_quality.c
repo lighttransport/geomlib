@@ -2,11 +2,10 @@
  * geomlib - Mesh Quality Analysis Implementation
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_quality.h"
 #include "geomlib/geomlib_healing.h"
-#include <stdlib.h>
-#include <string.h>
-#include <math.h>
 #include <float.h>
 
 #ifndef M_PI
@@ -32,7 +31,7 @@ geomlib_triangle_quality geomlib_compute_triangle_quality(
     const geomlib_quality_thresholds *thresholds
 ) {
     geomlib_triangle_quality quality;
-    memset(&quality, 0, sizeof(quality));
+    geomlib_memset(&quality, 0, sizeof(quality));
 
     /* Compute edges */
     geomlib_vec3 e0 = geomlib_vec3_sub(p1, p0);
@@ -126,7 +125,7 @@ int geomlib_compute_mesh_quality(
     geomlib_quality_thresholds default_thresholds = geomlib_quality_thresholds_default();
     if (!thresholds) thresholds = &default_thresholds;
 
-    memset(stats, 0, sizeof(geomlib_mesh_quality_stats));
+    geomlib_memset(stats, 0, sizeof(geomlib_mesh_quality_stats));
 
     /* Initialize min/max values */
     stats->min_triangle_area = FLT_MAX;
@@ -222,7 +221,7 @@ int geomlib_compute_mesh_quality(
         }
 
         /* Compute vertex valence statistics */
-        int *valences = calloc(mesh->vertex_count, sizeof(int));
+        int *valences = geomlib_calloc(mesh->vertex_count, sizeof(int));
 
         for (size_t he = 0; he < hemesh.halfedge_count; he++) {
             uint32_t v = hemesh.halfedges[he].vertex;
@@ -245,7 +244,7 @@ int geomlib_compute_mesh_quality(
 
         stats->mean_valence = sum_valence / mesh->vertex_count;
 
-        free(valences);
+        geomlib_free(valences);
         geomlib_halfedge_free(&hemesh);
     }
 
@@ -272,7 +271,7 @@ int geomlib_compute_per_triangle_quality(
     geomlib_quality_thresholds default_thresholds = geomlib_quality_thresholds_default();
     if (!thresholds) thresholds = &default_thresholds;
 
-    *quality_array = malloc(mesh->triangle_count * sizeof(geomlib_triangle_quality));
+    *quality_array = geomlib_malloc(mesh->triangle_count * sizeof(geomlib_triangle_quality));
     if (!*quality_array) return GEOMLIB_MESH_ERROR_MEMORY;
 
     for (size_t t = 0; t < mesh->triangle_count; t++) {
@@ -327,7 +326,7 @@ int geomlib_identify_bad_triangles(
     }
 
     /* Second pass: collect bad triangle indices */
-    *bad_triangle_indices = malloc(count * sizeof(uint32_t));
+    *bad_triangle_indices = geomlib_malloc(count * sizeof(uint32_t));
     if (!*bad_triangle_indices) return GEOMLIB_MESH_ERROR_MEMORY;
 
     size_t idx = 0;
@@ -375,8 +374,8 @@ int geomlib_compute_quality_histogram(
     if (!mesh || !histogram || bin_count <= 0) return GEOMLIB_MESH_ERROR_INVALID;
 
     histogram->bin_count = bin_count;
-    histogram->angle_bins = calloc(bin_count, sizeof(float));
-    histogram->aspect_ratio_bins = calloc(bin_count, sizeof(float));
+    histogram->angle_bins = geomlib_calloc(bin_count, sizeof(float));
+    histogram->aspect_ratio_bins = geomlib_calloc(bin_count, sizeof(float));
 
     if (!histogram->angle_bins || !histogram->aspect_ratio_bins) {
         geomlib_quality_histogram_free(histogram);
@@ -414,11 +413,11 @@ int geomlib_compute_quality_histogram(
 void geomlib_quality_histogram_free(geomlib_quality_histogram *histogram) {
     if (!histogram) return;
     if (histogram->angle_bins) {
-        free(histogram->angle_bins);
+        geomlib_free(histogram->angle_bins);
         histogram->angle_bins = NULL;
     }
     if (histogram->aspect_ratio_bins) {
-        free(histogram->aspect_ratio_bins);
+        geomlib_free(histogram->aspect_ratio_bins);
         histogram->aspect_ratio_bins = NULL;
     }
     histogram->bin_count = 0;

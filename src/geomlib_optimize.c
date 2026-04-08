@@ -2,10 +2,9 @@
  * geomlib - Mesh Optimization Implementation
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_optimize.h"
-#include <stdlib.h>
-#include <string.h>
-#include <math.h>
 #include <float.h>
 #include <time.h>
 
@@ -43,7 +42,7 @@ typedef struct vertex_cache {
 
 static vertex_cache vertex_cache_create(uint32_t size) {
     vertex_cache cache;
-    cache.entries = (uint32_t*)malloc(size * sizeof(uint32_t));
+    cache.entries = (uint32_t*)geomlib_malloc(size * sizeof(uint32_t));
     cache.size = size;
     cache.count = 0;
     for (uint32_t i = 0; i < size; i++) {
@@ -53,7 +52,7 @@ static vertex_cache vertex_cache_create(uint32_t size) {
 }
 
 static void vertex_cache_free(vertex_cache *cache) {
-    free(cache->entries);
+    geomlib_free(cache->entries);
     cache->entries = NULL;
 }
 
@@ -64,7 +63,7 @@ static bool vertex_cache_lookup(vertex_cache *cache, uint32_t vertex) {
             /* Move to front (MRU) */
             if (i > 0) {
                 uint32_t temp = cache->entries[i];
-                memmove(&cache->entries[1], &cache->entries[0], i * sizeof(uint32_t));
+                geomlib_memmove(&cache->entries[1], &cache->entries[0], i * sizeof(uint32_t));
                 cache->entries[0] = temp;
             }
             return true;
@@ -78,7 +77,7 @@ static void vertex_cache_insert(vertex_cache *cache, uint32_t vertex) {
     if (cache->count < cache->size) {
         cache->count++;
     }
-    memmove(&cache->entries[1], &cache->entries[0], (cache->count - 1) * sizeof(uint32_t));
+    geomlib_memmove(&cache->entries[1], &cache->entries[0], (cache->count - 1) * sizeof(uint32_t));
     cache->entries[0] = vertex;
 }
 
@@ -115,7 +114,7 @@ geomlib_cache_stats geomlib_analyze_vertex_cache(
 
     /* Build index buffer */
     size_t index_count = mesh->triangle_count * 3;
-    uint32_t *indices = (uint32_t*)malloc(index_count * sizeof(uint32_t));
+    uint32_t *indices = (uint32_t*)geomlib_malloc(index_count * sizeof(uint32_t));
 
     for (size_t i = 0; i < mesh->triangle_count; i++) {
         indices[i * 3 + 0] = mesh->indices[i * 3 + 0];
@@ -132,7 +131,7 @@ geomlib_cache_stats geomlib_analyze_vertex_cache(
     stats.acmr = (float)stats.cache_misses / (float)triangle_count;
     stats.atvr = (float)stats.transformed_vertices / (float)mesh->vertex_count;
 
-    free(indices);
+    geomlib_free(indices);
     return stats;
 }
 
@@ -191,7 +190,7 @@ static int geomlib_optimize_forsyth(
     size_t triangle_count = mesh->triangle_count;
 
     /* Build vertex data */
-    vertex_data *vertices = (vertex_data*)calloc(vertex_count, sizeof(vertex_data));
+    vertex_data *vertices = (vertex_data*)geomlib_calloc(vertex_count, sizeof(vertex_data));
 
     /* Count triangles per vertex */
     for (size_t i = 0; i < triangle_count; i++) {
@@ -204,7 +203,7 @@ static int geomlib_optimize_forsyth(
     /* Allocate triangle lists */
     for (size_t i = 0; i < vertex_count; i++) {
         vertices[i].triangle_capacity = vertices[i].triangle_count;
-        vertices[i].triangles = (uint32_t*)malloc(vertices[i].triangle_capacity * sizeof(uint32_t));
+        vertices[i].triangles = (uint32_t*)geomlib_malloc(vertices[i].triangle_capacity * sizeof(uint32_t));
         vertices[i].triangle_count = 0;
         vertices[i].cache_position = -1;
         vertices[i].emitted = false;
@@ -224,8 +223,8 @@ static int geomlib_optimize_forsyth(
     }
 
     /* Triangle scores and emitted flags */
-    float *triangle_scores = (float*)malloc(triangle_count * sizeof(float));
-    bool *triangle_emitted = (bool*)calloc(triangle_count, sizeof(bool));
+    float *triangle_scores = (float*)geomlib_malloc(triangle_count * sizeof(float));
+    bool *triangle_emitted = (bool*)geomlib_calloc(triangle_count, sizeof(bool));
 
     for (size_t i = 0; i < triangle_count; i++) {
         triangle_scores[i] = 0.0f;
@@ -236,7 +235,7 @@ static int geomlib_optimize_forsyth(
     }
 
     /* LRU cache */
-    uint32_t *cache = (uint32_t*)malloc(cache_size * sizeof(uint32_t));
+    uint32_t *cache = (uint32_t*)geomlib_malloc(cache_size * sizeof(uint32_t));
     uint32_t cache_count = 0;
     for (uint32_t i = 0; i < cache_size; i++) {
         cache[i] = UINT32_MAX;
@@ -303,14 +302,14 @@ static int geomlib_optimize_forsyth(
             if (cache_pos >= 0) {
                 /* Move to front */
                 uint32_t temp = cache[cache_pos];
-                memmove(&cache[1], &cache[0], cache_pos * sizeof(uint32_t));
+                geomlib_memmove(&cache[1], &cache[0], cache_pos * sizeof(uint32_t));
                 cache[0] = temp;
             } else {
                 /* Insert at front */
                 if (cache_count < cache_size) {
                     cache_count++;
                 }
-                memmove(&cache[1], &cache[0], (cache_count - 1) * sizeof(uint32_t));
+                geomlib_memmove(&cache[1], &cache[0], (cache_count - 1) * sizeof(uint32_t));
                 cache[0] = v;
             }
         }
@@ -346,12 +345,12 @@ static int geomlib_optimize_forsyth(
 
     /* Cleanup */
     for (size_t i = 0; i < vertex_count; i++) {
-        free(vertices[i].triangles);
+        geomlib_free(vertices[i].triangles);
     }
-    free(vertices);
-    free(triangle_scores);
-    free(triangle_emitted);
-    free(cache);
+    geomlib_free(vertices);
+    geomlib_free(triangle_scores);
+    geomlib_free(triangle_emitted);
+    geomlib_free(cache);
 
     return GEOMLIB_MESH_SUCCESS;
 }
@@ -385,11 +384,11 @@ int geomlib_optimize_vertex_cache(
 
     /* Optimize indices */
     size_t index_count = mesh->triangle_count * 3;
-    uint32_t *new_indices = (uint32_t*)malloc(index_count * sizeof(uint32_t));
+    uint32_t *new_indices = (uint32_t*)geomlib_malloc(index_count * sizeof(uint32_t));
 
     int result = geomlib_optimize_indices(mesh, new_indices, algorithm, cache_size);
     if (result != GEOMLIB_MESH_SUCCESS) {
-        free(new_indices);
+        geomlib_free(new_indices);
         return result;
     }
 
@@ -400,7 +399,7 @@ int geomlib_optimize_vertex_cache(
         mesh->indices[i * 3 + 2] = new_indices[i * 3 + 2];
     }
 
-    free(new_indices);
+    geomlib_free(new_indices);
     return GEOMLIB_MESH_SUCCESS;
 }
 
@@ -432,20 +431,20 @@ geomlib_spatial_hash geomlib_spatial_hash_create(
     hash.grid_size = (uint32_t)(vertex_count / 4 + 1);  /* Reasonable hash table size */
 
     /* Allocate buckets */
-    hash.grid = (uint32_t**)calloc(hash.grid_size, sizeof(uint32_t*));
-    hash.bucket_sizes = (uint32_t*)calloc(hash.grid_size, sizeof(uint32_t));
-    hash.bucket_capacities = (uint32_t*)calloc(hash.grid_size, sizeof(uint32_t));
+    hash.grid = (uint32_t**)geomlib_calloc(hash.grid_size, sizeof(uint32_t*));
+    hash.bucket_sizes = (uint32_t*)geomlib_calloc(hash.grid_size, sizeof(uint32_t));
+    hash.bucket_capacities = (uint32_t*)geomlib_calloc(hash.grid_size, sizeof(uint32_t));
 
     return hash;
 }
 
 void geomlib_spatial_hash_free(geomlib_spatial_hash *hash) {
     for (uint32_t i = 0; i < hash->grid_size; i++) {
-        free(hash->grid[i]);
+        geomlib_free(hash->grid[i]);
     }
-    free(hash->grid);
-    free(hash->bucket_sizes);
-    free(hash->bucket_capacities);
+    geomlib_free(hash->grid);
+    geomlib_free(hash->bucket_sizes);
+    geomlib_free(hash->bucket_capacities);
 }
 
 static void spatial_hash_insert(geomlib_spatial_hash *hash, uint32_t vertex_idx, geomlib_vec3 pos) {
@@ -454,7 +453,7 @@ static void spatial_hash_insert(geomlib_spatial_hash *hash, uint32_t vertex_idx,
     /* Ensure capacity */
     if (hash->bucket_sizes[h] >= hash->bucket_capacities[h]) {
         uint32_t new_capacity = hash->bucket_capacities[h] == 0 ? 4 : hash->bucket_capacities[h] * 2;
-        hash->grid[h] = (uint32_t*)realloc(hash->grid[h], new_capacity * sizeof(uint32_t));
+        hash->grid[h] = (uint32_t*)geomlib_realloc(hash->grid[h], new_capacity * sizeof(uint32_t));
         hash->bucket_capacities[h] = new_capacity;
     }
 
@@ -474,8 +473,8 @@ geomlib_weld_result geomlib_weld_vertices(
     );
 
     /* Build remap table */
-    result.vertex_remap = (uint32_t*)malloc(mesh->vertex_count * sizeof(uint32_t));
-    bool *is_unique = (bool*)calloc(mesh->vertex_count, sizeof(bool));
+    result.vertex_remap = (uint32_t*)geomlib_malloc(mesh->vertex_count * sizeof(uint32_t));
+    bool *is_unique = (bool*)geomlib_calloc(mesh->vertex_count, sizeof(bool));
 
     for (size_t i = 0; i < mesh->vertex_count; i++) {
         result.vertex_remap[i] = (uint32_t)i;
@@ -514,8 +513,8 @@ geomlib_weld_result geomlib_weld_vertices(
     }
 
     /* Build unique vertex list */
-    result.vertices = (geomlib_vec3*)malloc(result.unique_vertex_count * sizeof(geomlib_vec3));
-    uint32_t *compact_remap = (uint32_t*)malloc(mesh->vertex_count * sizeof(uint32_t));
+    result.vertices = (geomlib_vec3*)geomlib_malloc(result.unique_vertex_count * sizeof(geomlib_vec3));
+    uint32_t *compact_remap = (uint32_t*)geomlib_malloc(mesh->vertex_count * sizeof(uint32_t));
 
     uint32_t unique_idx = 0;
     for (size_t i = 0; i < mesh->vertex_count; i++) {
@@ -533,7 +532,7 @@ geomlib_weld_result geomlib_weld_vertices(
 
     /* Remap indices */
     size_t index_count = mesh->triangle_count * 3;
-    result.indices = (uint32_t*)malloc(index_count * sizeof(uint32_t));
+    result.indices = (uint32_t*)geomlib_malloc(index_count * sizeof(uint32_t));
 
     for (size_t i = 0; i < mesh->triangle_count; i++) {
         result.indices[i * 3 + 0] = result.vertex_remap[mesh->indices[i * 3 + 0]];
@@ -542,8 +541,8 @@ geomlib_weld_result geomlib_weld_vertices(
     }
 
     /* Cleanup */
-    free(compact_remap);
-    free(is_unique);
+    geomlib_free(compact_remap);
+    geomlib_free(is_unique);
     geomlib_spatial_hash_free(&hash);
 
     return result;
@@ -558,9 +557,9 @@ int geomlib_apply_weld_result(
     }
 
     /* Replace vertices */
-    free(mesh->vertices);
-    mesh->vertices = (geomlib_vec3*)malloc(result->unique_vertex_count * sizeof(geomlib_vec3));
-    memcpy(mesh->vertices, result->vertices, result->unique_vertex_count * sizeof(geomlib_vec3));
+    geomlib_free(mesh->vertices);
+    mesh->vertices = (geomlib_vec3*)geomlib_malloc(result->unique_vertex_count * sizeof(geomlib_vec3));
+    geomlib_memcpy(mesh->vertices, result->vertices, result->unique_vertex_count * sizeof(geomlib_vec3));
     mesh->vertex_count = result->unique_vertex_count;
 
     /* Update indices */
@@ -574,9 +573,9 @@ int geomlib_apply_weld_result(
 }
 
 void geomlib_weld_result_free(geomlib_weld_result *result) {
-    free(result->vertices);
-    free(result->indices);
-    free(result->vertex_remap);
+    geomlib_free(result->vertices);
+    geomlib_free(result->indices);
+    geomlib_free(result->vertex_remap);
 }
 
 /* ============================================================================
@@ -589,8 +588,8 @@ int geomlib_optimize_vertex_fetch(geomlib_trimesh *mesh) {
     }
 
     /* Build vertex usage map */
-    uint32_t *vertex_first_use = (uint32_t*)malloc(mesh->vertex_count * sizeof(uint32_t));
-    bool *vertex_used = (bool*)calloc(mesh->vertex_count, sizeof(bool));
+    uint32_t *vertex_first_use = (uint32_t*)geomlib_malloc(mesh->vertex_count * sizeof(uint32_t));
+    bool *vertex_used = (bool*)geomlib_calloc(mesh->vertex_count, sizeof(bool));
 
     for (size_t i = 0; i < mesh->vertex_count; i++) {
         vertex_first_use[i] = UINT32_MAX;
@@ -608,8 +607,8 @@ int geomlib_optimize_vertex_fetch(geomlib_trimesh *mesh) {
     }
 
     /* Build new vertex order */
-    uint32_t *new_order = (uint32_t*)malloc(mesh->vertex_count * sizeof(uint32_t));
-    uint32_t *remap = (uint32_t*)malloc(mesh->vertex_count * sizeof(uint32_t));
+    uint32_t *new_order = (uint32_t*)geomlib_malloc(mesh->vertex_count * sizeof(uint32_t));
+    uint32_t *remap = (uint32_t*)geomlib_malloc(mesh->vertex_count * sizeof(uint32_t));
 
     uint32_t new_idx = 0;
     for (uint32_t first_tri = 0; first_tri < mesh->triangle_count; first_tri++) {
@@ -623,12 +622,12 @@ int geomlib_optimize_vertex_fetch(geomlib_trimesh *mesh) {
     }
 
     /* Reorder vertices */
-    geomlib_vec3 *new_vertices = (geomlib_vec3*)malloc(mesh->vertex_count * sizeof(geomlib_vec3));
+    geomlib_vec3 *new_vertices = (geomlib_vec3*)geomlib_malloc(mesh->vertex_count * sizeof(geomlib_vec3));
     for (size_t i = 0; i < mesh->vertex_count; i++) {
         new_vertices[i] = mesh->vertices[new_order[i]];
     }
 
-    free(mesh->vertices);
+    geomlib_free(mesh->vertices);
     mesh->vertices = new_vertices;
 
     /* Update indices */
@@ -639,10 +638,10 @@ int geomlib_optimize_vertex_fetch(geomlib_trimesh *mesh) {
     }
 
     /* Cleanup */
-    free(vertex_first_use);
-    free(vertex_used);
-    free(new_order);
-    free(remap);
+    geomlib_free(vertex_first_use);
+    geomlib_free(vertex_used);
+    geomlib_free(new_order);
+    geomlib_free(remap);
 
     return GEOMLIB_MESH_SUCCESS;
 }
@@ -673,8 +672,8 @@ int geomlib_optimize_overdraw(
     }
 
     /* Compute triangle centers and depths */
-    geomlib_vec3 *centers = (geomlib_vec3*)malloc(mesh->triangle_count * sizeof(geomlib_vec3));
-    float *depths = (float*)malloc(mesh->triangle_count * sizeof(float));
+    geomlib_vec3 *centers = (geomlib_vec3*)geomlib_malloc(mesh->triangle_count * sizeof(geomlib_vec3));
+    float *depths = (float*)geomlib_malloc(mesh->triangle_count * sizeof(float));
 
     for (size_t i = 0; i < mesh->triangle_count; i++) {
         geomlib_vec3 v0 = mesh->vertices[mesh->indices[i * 3 + 0]];
@@ -692,7 +691,7 @@ int geomlib_optimize_overdraw(
     }
 
     /* Sort triangles front-to-back */
-    uint32_t *sorted_indices = (uint32_t*)malloc(mesh->triangle_count * sizeof(uint32_t));
+    uint32_t *sorted_indices = (uint32_t*)geomlib_malloc(mesh->triangle_count * sizeof(uint32_t));
     for (size_t i = 0; i < mesh->triangle_count; i++) {
         sorted_indices[i] = (uint32_t)i;
     }
@@ -709,7 +708,7 @@ int geomlib_optimize_overdraw(
     }
 
     /* Reorder indices */
-    uint32_t *new_indices = (uint32_t*)malloc(mesh->triangle_count * 3 * sizeof(uint32_t));
+    uint32_t *new_indices = (uint32_t*)geomlib_malloc(mesh->triangle_count * 3 * sizeof(uint32_t));
     for (size_t i = 0; i < mesh->triangle_count; i++) {
         uint32_t src_tri = sorted_indices[i];
         new_indices[i * 3 + 0] = mesh->indices[src_tri * 3 + 0];
@@ -717,13 +716,13 @@ int geomlib_optimize_overdraw(
         new_indices[i * 3 + 2] = mesh->indices[src_tri * 3 + 2];
     }
 
-    free(mesh->indices);
+    geomlib_free(mesh->indices);
     mesh->indices = new_indices;
 
     /* Cleanup */
-    free(centers);
-    free(depths);
-    free(sorted_indices);
+    geomlib_free(centers);
+    geomlib_free(depths);
+    geomlib_free(sorted_indices);
 
     return GEOMLIB_MESH_SUCCESS;
 }
@@ -795,7 +794,7 @@ static void build_triangle_adjacency(
     const geomlib_trimesh *mesh,
     uint32_t **adjacency  /* 3 neighbors per triangle */
 ) {
-    *adjacency = (uint32_t*)malloc(mesh->triangle_count * 3 * sizeof(uint32_t));
+    *adjacency = (uint32_t*)geomlib_malloc(mesh->triangle_count * 3 * sizeof(uint32_t));
 
     /* Initialize all to no neighbor */
     for (size_t i = 0; i < mesh->triangle_count * 3; i++) {
@@ -841,7 +840,7 @@ static geomlib_tristrip extract_strip(
     strip.restart_index = UINT32_MAX;
 
     size_t capacity = 128;
-    strip.indices = (uint32_t*)malloc(capacity * sizeof(uint32_t));
+    strip.indices = (uint32_t*)geomlib_malloc(capacity * sizeof(uint32_t));
     strip.index_count = 0;
 
     /* Add first triangle */
@@ -883,7 +882,7 @@ static geomlib_tristrip extract_strip(
             if (v != v0 && v != v1) {
                 if (strip.index_count >= capacity) {
                     capacity *= 2;
-                    strip.indices = (uint32_t*)realloc(strip.indices, capacity * sizeof(uint32_t));
+                    strip.indices = (uint32_t*)geomlib_realloc(strip.indices, capacity * sizeof(uint32_t));
                 }
                 strip.indices[strip.index_count++] = v;
                 break;
@@ -913,11 +912,11 @@ geomlib_tristrip_group geomlib_generate_tristrips(
     build_triangle_adjacency(mesh, &adjacency);
 
     /* Track used triangles */
-    bool *used = (bool*)calloc(mesh->triangle_count, sizeof(bool));
+    bool *used = (bool*)geomlib_calloc(mesh->triangle_count, sizeof(bool));
 
     /* Extract strips */
     size_t capacity = 16;
-    group.strips = (geomlib_tristrip*)malloc(capacity * sizeof(geomlib_tristrip));
+    group.strips = (geomlib_tristrip*)geomlib_malloc(capacity * sizeof(geomlib_tristrip));
 
     for (size_t i = 0; i < mesh->triangle_count; i++) {
         if (used[i]) continue;
@@ -926,23 +925,23 @@ geomlib_tristrip_group geomlib_generate_tristrips(
 
         if (group.strip_count >= capacity) {
             capacity *= 2;
-            group.strips = (geomlib_tristrip*)realloc(group.strips, capacity * sizeof(geomlib_tristrip));
+            group.strips = (geomlib_tristrip*)geomlib_realloc(group.strips, capacity * sizeof(geomlib_tristrip));
         }
 
         group.strips[group.strip_count++] = strip;
     }
 
-    free(adjacency);
-    free(used);
+    geomlib_free(adjacency);
+    geomlib_free(used);
 
     return group;
 }
 
 void geomlib_tristrip_group_free(geomlib_tristrip_group *group) {
     for (size_t i = 0; i < group->strip_count; i++) {
-        free(group->strips[i].indices);
+        geomlib_free(group->strips[i].indices);
     }
-    free(group->strips);
+    geomlib_free(group->strips);
 }
 
 /* ============================================================================
@@ -1003,7 +1002,7 @@ geomlib_compressed_indices geomlib_compress_indices(
 
     /* Worst case: 5 bytes per index + header */
     size_t max_size = index_count * 5 + 16;
-    compressed.data = (uint8_t*)malloc(max_size);
+    compressed.data = (uint8_t*)geomlib_malloc(max_size);
     compressed.compressed_size = 0;
 
     /* Encode using delta encoding */
@@ -1026,7 +1025,7 @@ geomlib_compressed_indices geomlib_compress_indices(
     }
 
     /* Shrink to actual size */
-    compressed.data = (uint8_t*)realloc(compressed.data, compressed.compressed_size);
+    compressed.data = (uint8_t*)geomlib_realloc(compressed.data, compressed.compressed_size);
 
     return compressed;
 }
@@ -1063,5 +1062,5 @@ int geomlib_decompress_indices(
 }
 
 void geomlib_compressed_indices_free(geomlib_compressed_indices *compressed) {
-    free(compressed->data);
+    geomlib_free(compressed->data);
 }

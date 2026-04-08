@@ -5,10 +5,9 @@
  * Linear System Solver Implementation
  */
 
+#include "geomlib/geomlib_allocator.h"
+#include "geomlib/geomlib_c11.h"
 #include "geomlib/geomlib_solver.h"
-#include <math.h>
-#include <stdlib.h>
-#include <string.h>
 
 /* ============================================================================
  * Gaussian Elimination with Partial Pivoting (float)
@@ -198,7 +197,7 @@ int geomlib_lu_solve(size_t n, const float *LU, const int *pivot, float *b) {
     }
     
     /* Apply permutation to b */
-    float *temp = (float *)malloc(n * sizeof(float));
+    float *temp = (float *)geomlib_malloc(n * sizeof(float));
     if (temp == NULL) {
         return GEOMLIB_SOLVER_ERROR_INVALID;
     }
@@ -206,8 +205,8 @@ int geomlib_lu_solve(size_t n, const float *LU, const int *pivot, float *b) {
     for (size_t i = 0; i < n; i++) {
         temp[i] = b[pivot[i]];
     }
-    memcpy(b, temp, n * sizeof(float));
-    free(temp);
+    geomlib_memcpy(b, temp, n * sizeof(float));
+    geomlib_free(temp);
     
     /* Forward substitution (solve Ly = Pb) */
     for (size_t i = 1; i < n; i++) {
@@ -293,7 +292,7 @@ int geomlib_lu_solve_d(size_t n, const double *LU, const int *pivot, double *b) 
     }
     
     /* Apply permutation to b */
-    double *temp = (double *)malloc(n * sizeof(double));
+    double *temp = (double *)geomlib_malloc(n * sizeof(double));
     if (temp == NULL) {
         return GEOMLIB_SOLVER_ERROR_INVALID;
     }
@@ -301,8 +300,8 @@ int geomlib_lu_solve_d(size_t n, const double *LU, const int *pivot, double *b) 
     for (size_t i = 0; i < n; i++) {
         temp[i] = b[pivot[i]];
     }
-    memcpy(b, temp, n * sizeof(double));
-    free(temp);
+    geomlib_memcpy(b, temp, n * sizeof(double));
+    geomlib_free(temp);
     
     /* Forward substitution (solve Ly = Pb) */
     for (size_t i = 1; i < n; i++) {
@@ -354,14 +353,14 @@ int geomlib_solve_cg(size_t n, const float *A, const float *b, float *x,
         return GEOMLIB_SOLVER_ERROR_INVALID;
     }
     
-    float *r = (float *)malloc(n * sizeof(float));
-    float *p = (float *)malloc(n * sizeof(float));
-    float *Ap = (float *)malloc(n * sizeof(float));
+    float *r = (float *)geomlib_malloc(n * sizeof(float));
+    float *p = (float *)geomlib_malloc(n * sizeof(float));
+    float *Ap = (float *)geomlib_malloc(n * sizeof(float));
     
     if (r == NULL || p == NULL || Ap == NULL) {
-        free(r);
-        free(p);
-        free(Ap);
+        geomlib_free(r);
+        geomlib_free(p);
+        geomlib_free(Ap);
         return GEOMLIB_SOLVER_ERROR_INVALID;
     }
     
@@ -410,9 +409,9 @@ int geomlib_solve_cg(size_t n, const float *A, const float *b, float *x,
         *iter_out = iter;
     }
     
-    free(r);
-    free(p);
-    free(Ap);
+    geomlib_free(r);
+    geomlib_free(p);
+    geomlib_free(Ap);
     
     return (iter < max_iter) ? GEOMLIB_SOLVER_SUCCESS : GEOMLIB_SOLVER_ERROR_NO_CONVERGE;
 }
@@ -445,14 +444,14 @@ int geomlib_solve_cg_d(size_t n, const double *A, const double *b, double *x,
         return GEOMLIB_SOLVER_ERROR_INVALID;
     }
     
-    double *r = (double *)malloc(n * sizeof(double));
-    double *p = (double *)malloc(n * sizeof(double));
-    double *Ap = (double *)malloc(n * sizeof(double));
+    double *r = (double *)geomlib_malloc(n * sizeof(double));
+    double *p = (double *)geomlib_malloc(n * sizeof(double));
+    double *Ap = (double *)geomlib_malloc(n * sizeof(double));
     
     if (r == NULL || p == NULL || Ap == NULL) {
-        free(r);
-        free(p);
-        free(Ap);
+        geomlib_free(r);
+        geomlib_free(p);
+        geomlib_free(Ap);
         return GEOMLIB_SOLVER_ERROR_INVALID;
     }
     
@@ -501,9 +500,9 @@ int geomlib_solve_cg_d(size_t n, const double *A, const double *b, double *x,
         *iter_out = iter;
     }
     
-    free(r);
-    free(p);
-    free(Ap);
+    geomlib_free(r);
+    geomlib_free(p);
+    geomlib_free(Ap);
     
     return (iter < max_iter) ? GEOMLIB_SOLVER_SUCCESS : GEOMLIB_SOLVER_ERROR_NO_CONVERGE;
 }
@@ -518,7 +517,7 @@ int geomlib_solve_jacobi(size_t n, const float *A, const float *b, float *x,
         return GEOMLIB_SOLVER_ERROR_INVALID;
     }
     
-    float *x_new = (float *)malloc(n * sizeof(float));
+    float *x_new = (float *)geomlib_malloc(n * sizeof(float));
     if (x_new == NULL) {
         return GEOMLIB_SOLVER_ERROR_INVALID;
     }
@@ -529,7 +528,7 @@ int geomlib_solve_jacobi(size_t n, const float *A, const float *b, float *x,
         
         for (size_t i = 0; i < n; i++) {
             if (fabsf(A[i * n + i]) < 1e-20f) {
-                free(x_new);
+                geomlib_free(x_new);
                 return GEOMLIB_SOLVER_ERROR_SINGULAR;
             }
             
@@ -547,7 +546,7 @@ int geomlib_solve_jacobi(size_t n, const float *A, const float *b, float *x,
             }
         }
         
-        memcpy(x, x_new, n * sizeof(float));
+        geomlib_memcpy(x, x_new, n * sizeof(float));
         
         if (max_diff < tol) {
             iter++;
@@ -559,7 +558,7 @@ int geomlib_solve_jacobi(size_t n, const float *A, const float *b, float *x,
         *iter_out = iter;
     }
     
-    free(x_new);
+    geomlib_free(x_new);
     
     return (iter < max_iter) ? GEOMLIB_SOLVER_SUCCESS : GEOMLIB_SOLVER_ERROR_NO_CONVERGE;
 }
@@ -574,7 +573,7 @@ int geomlib_solve_jacobi_d(size_t n, const double *A, const double *b, double *x
         return GEOMLIB_SOLVER_ERROR_INVALID;
     }
     
-    double *x_new = (double *)malloc(n * sizeof(double));
+    double *x_new = (double *)geomlib_malloc(n * sizeof(double));
     if (x_new == NULL) {
         return GEOMLIB_SOLVER_ERROR_INVALID;
     }
@@ -585,7 +584,7 @@ int geomlib_solve_jacobi_d(size_t n, const double *A, const double *b, double *x
         
         for (size_t i = 0; i < n; i++) {
             if (fabs(A[i * n + i]) < 1e-30) {
-                free(x_new);
+                geomlib_free(x_new);
                 return GEOMLIB_SOLVER_ERROR_SINGULAR;
             }
             
@@ -603,7 +602,7 @@ int geomlib_solve_jacobi_d(size_t n, const double *A, const double *b, double *x
             }
         }
         
-        memcpy(x, x_new, n * sizeof(double));
+        geomlib_memcpy(x, x_new, n * sizeof(double));
         
         if (max_diff < tol) {
             iter++;
@@ -615,7 +614,7 @@ int geomlib_solve_jacobi_d(size_t n, const double *A, const double *b, double *x
         *iter_out = iter;
     }
     
-    free(x_new);
+    geomlib_free(x_new);
     
     return (iter < max_iter) ? GEOMLIB_SOLVER_SUCCESS : GEOMLIB_SOLVER_ERROR_NO_CONVERGE;
 }
@@ -630,7 +629,7 @@ int geomlib_eigen_power(size_t n, const float *A, float *eigenvalue, float *eige
         return GEOMLIB_SOLVER_ERROR_INVALID;
     }
     
-    float *y = (float *)malloc(n * sizeof(float));
+    float *y = (float *)geomlib_malloc(n * sizeof(float));
     if (y == NULL) {
         return GEOMLIB_SOLVER_ERROR_INVALID;
     }
@@ -655,7 +654,7 @@ int geomlib_eigen_power(size_t n, const float *A, float *eigenvalue, float *eige
         }
         
         if (max_val < 1e-20f) {
-            free(y);
+            geomlib_free(y);
             return GEOMLIB_SOLVER_ERROR_SINGULAR;
         }
         
@@ -668,7 +667,7 @@ int geomlib_eigen_power(size_t n, const float *A, float *eigenvalue, float *eige
         /* Check convergence */
         if (fabsf(lambda - lambda_old) < tol) {
             *eigenvalue = lambda;
-            free(y);
+            geomlib_free(y);
             return GEOMLIB_SOLVER_SUCCESS;
         }
         
@@ -676,7 +675,7 @@ int geomlib_eigen_power(size_t n, const float *A, float *eigenvalue, float *eige
     }
     
     *eigenvalue = lambda_old;
-    free(y);
+    geomlib_free(y);
     return GEOMLIB_SOLVER_ERROR_NO_CONVERGE;
 }
 
@@ -690,7 +689,7 @@ int geomlib_eigen_power_d(size_t n, const double *A, double *eigenvalue, double 
         return GEOMLIB_SOLVER_ERROR_INVALID;
     }
     
-    double *y = (double *)malloc(n * sizeof(double));
+    double *y = (double *)geomlib_malloc(n * sizeof(double));
     if (y == NULL) {
         return GEOMLIB_SOLVER_ERROR_INVALID;
     }
@@ -715,7 +714,7 @@ int geomlib_eigen_power_d(size_t n, const double *A, double *eigenvalue, double 
         }
         
         if (max_val < 1e-30) {
-            free(y);
+            geomlib_free(y);
             return GEOMLIB_SOLVER_ERROR_SINGULAR;
         }
         
@@ -728,7 +727,7 @@ int geomlib_eigen_power_d(size_t n, const double *A, double *eigenvalue, double 
         /* Check convergence */
         if (fabs(lambda - lambda_old) < tol) {
             *eigenvalue = lambda;
-            free(y);
+            geomlib_free(y);
             return GEOMLIB_SOLVER_SUCCESS;
         }
         
@@ -736,7 +735,7 @@ int geomlib_eigen_power_d(size_t n, const double *A, double *eigenvalue, double 
     }
     
     *eigenvalue = lambda_old;
-    free(y);
+    geomlib_free(y);
     return GEOMLIB_SOLVER_ERROR_NO_CONVERGE;
 }
 
@@ -750,13 +749,13 @@ int geomlib_solve_least_squares(size_t m, size_t n, float *A, float *b, float *x
     }
     
     /* Compute A^T * A */
-    float *ATA = (float *)malloc(n * n * sizeof(float));
+    float *ATA = (float *)geomlib_malloc(n * n * sizeof(float));
     /* Compute A^T * b */
-    float *ATb = (float *)malloc(n * sizeof(float));
+    float *ATb = (float *)geomlib_malloc(n * sizeof(float));
     
     if (ATA == NULL || ATb == NULL) {
-        free(ATA);
-        free(ATb);
+        geomlib_free(ATA);
+        geomlib_free(ATb);
         return GEOMLIB_SOLVER_ERROR_INVALID;
     }
     
@@ -784,11 +783,11 @@ int geomlib_solve_least_squares(size_t m, size_t n, float *A, float *b, float *x
     int result = geomlib_solve_gauss(n, ATA, ATb);
     
     if (result == GEOMLIB_SOLVER_SUCCESS) {
-        memcpy(x, ATb, n * sizeof(float));
+        geomlib_memcpy(x, ATb, n * sizeof(float));
     }
     
-    free(ATA);
-    free(ATb);
+    geomlib_free(ATA);
+    geomlib_free(ATb);
     
     return result;
 }
@@ -803,13 +802,13 @@ int geomlib_solve_least_squares_d(size_t m, size_t n, double *A, double *b, doub
     }
     
     /* Compute A^T * A */
-    double *ATA = (double *)malloc(n * n * sizeof(double));
+    double *ATA = (double *)geomlib_malloc(n * n * sizeof(double));
     /* Compute A^T * b */
-    double *ATb = (double *)malloc(n * sizeof(double));
+    double *ATb = (double *)geomlib_malloc(n * sizeof(double));
     
     if (ATA == NULL || ATb == NULL) {
-        free(ATA);
-        free(ATb);
+        geomlib_free(ATA);
+        geomlib_free(ATb);
         return GEOMLIB_SOLVER_ERROR_INVALID;
     }
     
@@ -837,11 +836,11 @@ int geomlib_solve_least_squares_d(size_t m, size_t n, double *A, double *b, doub
     int result = geomlib_solve_gauss_d(n, ATA, ATb);
     
     if (result == GEOMLIB_SOLVER_SUCCESS) {
-        memcpy(x, ATb, n * sizeof(double));
+        geomlib_memcpy(x, ATb, n * sizeof(double));
     }
     
-    free(ATA);
-    free(ATb);
+    geomlib_free(ATA);
+    geomlib_free(ATb);
     
     return result;
 }

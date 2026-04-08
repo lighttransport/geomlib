@@ -53,3 +53,7 @@ add_test(NAME test_optimize COMMAND test_optimize)
 add_executable(test_cfd test_cfd.cpp)
 target_link_libraries(test_cfd PRIVATE geomlib)
 add_test(NAME test_cfd COMMAND test_cfd)
+
+add_executable(test_c11 test_c11.cpp)
+target_link_libraries(test_c11 PRIVATE geomlib)
+add_test(NAME test_c11 COMMAND test_c11)

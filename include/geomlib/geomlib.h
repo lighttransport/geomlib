@@ -25,6 +25,10 @@
 #define GEOMLIB_VERSION_MINOR 1
 #define GEOMLIB_VERSION_PATCH 0
 
+/* C11 portability and allocator (must come first) */
+#include "geomlib_allocator.h"
+#include "geomlib_c11.h"
+
 /* Core components */
 #include "geomlib_linalg.h"
 #include "geomlib_solver.h"
