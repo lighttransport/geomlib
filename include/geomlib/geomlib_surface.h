@@ -83,10 +83,11 @@ size_t geomlib_pointcloud_add_point(
  * Estimate normals from k-nearest neighbors
  *
  * Uses PCA to estimate normal direction from local neighborhood.
- * Orients normals consistently using minimum spanning tree.
+ * Orients normals consistently within each connected neighbor component using
+ * a minimum spanning forest. Collinear neighborhoods have zero normals.
  *
  * @param pc    Point cloud
- * @param k     Number of neighbors to use (typically 10-30)
+ * @param k     Number of neighbors to use (at least 2, typically 10-30)
  * @return      GEOMLIB_MESH_SUCCESS on success
  */
 int geomlib_pointcloud_estimate_normals(geomlib_pointcloud *pc, int k);
@@ -94,11 +95,12 @@ int geomlib_pointcloud_estimate_normals(geomlib_pointcloud *pc, int k);
 /**
  * Downsample point cloud using voxel grid
  *
- * Reduces point count by averaging points within voxel cells.
+ * Reduces point count by averaging points in voxels anchored at the cloud's
+ * minimum corner. Normals are averaged and normalized, and confidence is averaged.
  *
  * @param pc            Input point cloud
  * @param voxel_size    Size of voxel cells
- * @param output        Output downsampled point cloud
+ * @param output        Empty output for the owned downsampled point cloud
  * @return              GEOMLIB_MESH_SUCCESS on success
  */
 int geomlib_pointcloud_downsample(
@@ -115,10 +117,10 @@ int geomlib_pointcloud_downsample(
  * Surface reconstruction method
  */
 typedef enum geomlib_surface_method {
-    GEOMLIB_SURFACE_GREEDY_PROJECTION,  /* Fast greedy triangulation */
-    GEOMLIB_SURFACE_BALL_PIVOTING,      /* Ball pivoting algorithm */
-    GEOMLIB_SURFACE_MARCHING_CUBES,     /* Voxel-based marching cubes */
-    GEOMLIB_SURFACE_ALPHA_SHAPE         /* Alpha shape reconstruction */
+    GEOMLIB_SURFACE_GREEDY_PROJECTION,  /* Tangent-plane fan triangulation with normal checks */
+    GEOMLIB_SURFACE_BALL_PIVOTING,      /* Empty radius-ball criterion */
+    GEOMLIB_SURFACE_MARCHING_CUBES,     /* Oriented-point implicit field, SDF extraction */
+    GEOMLIB_SURFACE_ALPHA_SHAPE         /* Delaunay tetrahedra with circumradius < alpha */
 } geomlib_surface_method;
 
 /**
@@ -157,10 +159,15 @@ geomlib_surface_params geomlib_surface_params_default(geomlib_surface_method met
 /**
  * Reconstruct surface from point cloud
  *
- * Fast surface reconstruction optimized for realtime use.
- * Produces low-poly proxy mesh suitable for collision detection and preview.
+ * All methods produce indexed triangle meshes. Greedy projection sorts the
+ * one-ring in the tangent plane and fans consecutive neighbors; ball pivoting
+ * accepts triangles whose radius-r ball is empty; marching cubes builds an
+ * oriented-point implicit field and extracts its zero level set; alpha shape
+ * keeps Delaunay tetrahedra with circumradius below alpha and emits their
+ * boundary. Ball pivoting and greedy projection use provided normals when
+ * present (and estimate local normals otherwise).
  *
- * @param pc        Input point cloud (must have normals for some methods)
+ * @param pc        Input point cloud
  * @param params    Reconstruction parameters
  * @param output    Output triangle mesh
  * @return          GEOMLIB_MESH_SUCCESS on success, error code otherwise
@@ -175,7 +182,9 @@ int geomlib_reconstruct_surface(
  * Quick surface reconstruction with automatic parameters
  *
  * Analyzes point cloud and chooses optimal parameters automatically.
- * Best for quick previews and prototyping.
+ * Best for quick previews and prototyping. A nonzero target_faces selects
+ * marching cubes and sets its voxel size from the requested count; zero uses
+ * the point-count heuristic.
  *
  * @param pc            Input point cloud
  * @param target_faces  Target number of faces (0 = automatic)

@@ -90,8 +90,22 @@ static void test_convex_hull() {
     test(hull_bounds.min.y <= mesh_bounds.min.y + 0.1f &&
          hull_bounds.max.y >= mesh_bounds.max.y - 0.1f, "convex_hull_encloses_y");
 
+    test(geomlib_is_convex(&hull, 0.01f), "convex_hull_is_convex");
+    test(geomlib_trimesh_volume(&hull) < 6.0f, "convex_hull_is_not_a_bounding_box");
+
     geomlib_trimesh_free(&hull);
     geomlib_trimesh_free(&mesh);
+
+    geomlib_trimesh box;
+    geomlib_create_box(&box, 1.0f, 1.0f, 1.0f);
+    geomlib_trimesh box_hull;
+    result = geomlib_compute_convex_hull(&box, &box_hull);
+    test(result == GEOMLIB_MESH_SUCCESS && box_hull.vertex_count == 8 &&
+         box_hull.triangle_count == 12 &&
+         fabsf(geomlib_trimesh_volume(&box_hull) - 1.0f) < 1e-3f,
+         "convex_hull_of_box_is_the_box");
+    geomlib_trimesh_free(&box_hull);
+    geomlib_trimesh_free(&box);
 }
 
 // Test convexity check

@@ -64,7 +64,7 @@ set(EMSCRIPTEN_LINK_FLAGS
     "-sMODULARIZE=1"
     "-sEXPORT_NAME=createGeomlibModule"
     "-sEXPORT_ES6=1"
-    "-sENVIRONMENT=web"
+    "-sENVIRONMENT=web,node"
     "-sMALLOC=emmalloc"
     "-sSTACK_SIZE=5MB"
     "-sINITIAL_MEMORY=16MB"
@@ -96,6 +96,7 @@ set_target_properties(geomlib-wasm PROPERTIES
 
 # Copy output to demo directory after build
 add_custom_command(TARGET geomlib-wasm POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_SOURCE_DIR}/demo/public
     COMMAND ${CMAKE_COMMAND} -E copy
         ${CMAKE_CURRENT_BINARY_DIR}/geomlib.js
         ${CMAKE_CURRENT_SOURCE_DIR}/demo/public/geomlib.js

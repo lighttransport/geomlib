@@ -25,6 +25,7 @@ extern "C" {
 #define GEOMLIB_MESH_ERROR_MEMORY     1
 #define GEOMLIB_MESH_ERROR_INVALID    2
 #define GEOMLIB_MESH_ERROR_DEGENERATE 3
+#define GEOMLIB_MESH_ERROR_UNSUPPORTED 4
 
 /* ============================================================================
  * Basic Polygon Types

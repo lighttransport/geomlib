@@ -701,6 +701,17 @@ bool geomlib_bvh_closest_point(
     return true;
 }
 
+typedef struct knn_candidate {
+    float dist2;
+    geomlib_vec3 point;
+    uint32_t primitive;
+} knn_candidate;
+
+static int compare_knn_candidates(const void *left, const void *right) {
+    const knn_candidate *a = left, *b = right;
+    return (a->dist2 > b->dist2) - (a->dist2 < b->dist2);
+}
+
 size_t geomlib_bvh_knn_query(
     const geomlib_bvh *bvh,
     geomlib_vec3 query,
@@ -709,27 +720,80 @@ size_t geomlib_bvh_knn_query(
     float *distances_out,
     uint32_t *primitive_ids_out
 ) {
-    /* Simplified k-NN: find closest point repeatedly */
-    /* For production, use priority queue */
-    if (!bvh || k == 0 || !points_out) {
+    if (!bvh || !bvh->mesh || bvh->node_count == 0 || k == 0 || !points_out || k > SIZE_MAX / sizeof(knn_candidate))
         return 0;
-    }
+    knn_candidate *best = malloc(k * sizeof(*best));
+    if (!best) return 0;
+    size_t count = 0;
 
-    if (k == 1) {
-        float dist;
-        uint32_t prim_id;
-        if (geomlib_bvh_closest_point(bvh, query, points_out, &dist, &prim_id)) {
-            if (distances_out) distances_out[0] = dist;
-            if (primitive_ids_out) primitive_ids_out[0] = prim_id;
-            return 1;
+    uint32_t stack[64];
+    int stack_ptr = 0;
+    stack[stack_ptr++] = 0;
+    while (stack_ptr > 0) {
+        uint32_t node_index = stack[--stack_ptr];
+        const geomlib_bvh_node *node = &bvh->nodes[node_index];
+        geomlib_vec3 node_point = geomlib_aabb_closest_point(&node->bounds, query);
+        geomlib_vec3 node_delta = geomlib_vec3_sub(node_point, query);
+        float node_dist2 = geomlib_vec3_dot(node_delta, node_delta);
+        if (count == k) {
+            float worst = 0.0f;
+            for (size_t i = 0; i < count; i++) if (best[i].dist2 > worst) worst = best[i].dist2;
+            if (node_dist2 > worst) continue;
         }
-        return 0;
+
+        if (node->is_leaf) {
+            for (uint32_t i = 0; i < node->data.leaf.primitive_count; i++) {
+                uint32_t primitive = bvh->primitive_indices[node->data.leaf.primitive_offset + i];
+                uint32_t i0 = bvh->mesh->indices[primitive * 3 + 0];
+                uint32_t i1 = bvh->mesh->indices[primitive * 3 + 1];
+                uint32_t i2 = bvh->mesh->indices[primitive * 3 + 2];
+                geomlib_vec3 point = geomlib_closest_point_triangle(query,
+                    bvh->mesh->vertices[i0], bvh->mesh->vertices[i1],
+                    bvh->mesh->vertices[i2]);
+                geomlib_vec3 delta = geomlib_vec3_sub(point, query);
+                float dist2 = geomlib_vec3_dot(delta, delta);
+                bool duplicate = false;
+                for (size_t j = 0; j < count && !duplicate; j++)
+                    duplicate = best[j].primitive == primitive;
+                if (duplicate) continue;
+                if (count < k) {
+                    best[count++] = (knn_candidate){dist2, point, primitive};
+                    continue;
+                }
+                size_t worst = 0;
+                for (size_t j = 1; j < count; j++)
+                    if (best[j].dist2 > best[worst].dist2) worst = j;
+                if (dist2 < best[worst].dist2)
+                    best[worst] = (knn_candidate){dist2, point, primitive};
+            }
+        } else {
+            const geomlib_bvh_node *left = &bvh->nodes[node->data.interior.left_child];
+            const geomlib_bvh_node *right = &bvh->nodes[node->data.interior.right_child];
+            geomlib_vec3 left_delta = geomlib_vec3_sub(
+                geomlib_aabb_closest_point(&left->bounds, query), query);
+            geomlib_vec3 right_delta = geomlib_vec3_sub(
+                geomlib_aabb_closest_point(&right->bounds, query), query);
+            float left_dist2 = geomlib_vec3_dot(left_delta, left_delta);
+            float right_dist2 = geomlib_vec3_dot(right_delta, right_delta);
+            /* Push the farther child first so the nearer subtree is visited next. */
+            if (left_dist2 < right_dist2) {
+                if (stack_ptr < 63) stack[stack_ptr++] = node->data.interior.right_child;
+                if (stack_ptr < 63) stack[stack_ptr++] = node->data.interior.left_child;
+            } else {
+                if (stack_ptr < 63) stack[stack_ptr++] = node->data.interior.left_child;
+                if (stack_ptr < 63) stack[stack_ptr++] = node->data.interior.right_child;
+            }
+        }
     }
 
-    /* For k > 1, this is a basic implementation */
-    /* Production code would use a proper priority queue */
-    return geomlib_bvh_closest_point(bvh, query, points_out,
-                                     distances_out, primitive_ids_out) ? 1 : 0;
+    qsort(best, count, sizeof(*best), compare_knn_candidates);
+    for (size_t i = 0; i < count; i++) {
+        points_out[i] = best[i].point;
+        if (distances_out) distances_out[i] = sqrtf(best[i].dist2);
+        if (primitive_ids_out) primitive_ids_out[i] = best[i].primitive;
+    }
+    free(best);
+    return count;
 }
 
 size_t geomlib_bvh_radius_query(

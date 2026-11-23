@@ -88,7 +88,7 @@ typedef struct geomlib_boundary_loops {
     size_t loop_count;
 } geomlib_boundary_loops;
 
-/* Extract all boundary loops */
+/* Extract closed boundary cycles whose vertices each meet two boundary edges. */
 geomlib_boundary_loops geomlib_extract_boundary_loops(
     const geomlib_trimesh *mesh
 );
@@ -251,7 +251,7 @@ int geomlib_remove_isolated_vertices(geomlib_trimesh *mesh);
 /* Remove duplicate faces */
 int geomlib_remove_duplicate_faces(geomlib_trimesh *mesh);
 
-/* Split non-manifold vertices */
+/* Split disconnected incident fans. Returns the number of splits or a negative error. */
 int geomlib_split_nonmanifold_vertices(geomlib_trimesh *mesh);
 
 /* ============================================================================

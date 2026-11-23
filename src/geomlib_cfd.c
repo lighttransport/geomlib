@@ -4,8 +4,6 @@
  */
 
 #include "geomlib/geomlib_cfd.h"
-#include "geomlib/geomlib_healing.h"
-#include "geomlib/geomlib_topology.h"
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -104,44 +102,24 @@ geomlib_vec3 geomlib_gradient_green_gauss(
     const float *values,
     size_t count
 ) {
-    geomlib_vec3 gradient = geomlib_vec3_create(0.0f, 0.0f, 0.0f);
-    float total_area = 0.0f;
-
-    /* For each edge of the polygon */
+    if (!vertices || !values || count < 3) return (geomlib_vec3){0};
+    geomlib_vec3d normal = {0}, circulation = {0};
+    geomlib_vec3d origin = {vertices[0].x, vertices[0].y, vertices[0].z};
     for (size_t i = 0; i < count; i++) {
         size_t j = (i + 1) % count;
-
-        /* Edge midpoint and value */
-        geomlib_vec3 midpoint = geomlib_vec3_mul(
-            geomlib_vec3_add(vertices[i], vertices[j]), 0.5f);
-        float edge_value = (values[i] + values[j]) * 0.5f;
-
-        /* Edge vector */
-        geomlib_vec3 edge = geomlib_vec3_sub(vertices[j], vertices[i]);
-
-        /* Contribution to gradient */
-        gradient.x += edge_value * edge.x;
-        gradient.y += edge_value * edge.y;
-        gradient.z += edge_value * edge.z;
-
-        /* Accumulate area */
-        if (i > 0) {
-            geomlib_vec3 v0 = vertices[0];
-            geomlib_vec3 v1 = vertices[i];
-            geomlib_vec3 v2 = vertices[j];
-            geomlib_vec3 e1 = geomlib_vec3_sub(v1, v0);
-            geomlib_vec3 e2 = geomlib_vec3_sub(v2, v0);
-            float tri_area = geomlib_vec3_length(geomlib_vec3_cross(e1, e2)) * 0.5f;
-            total_area += tri_area;
-        }
+        geomlib_vec3d a = {vertices[i].x, vertices[i].y, vertices[i].z};
+        geomlib_vec3d b = {vertices[j].x, vertices[j].y, vertices[j].z};
+        normal = geomlib_vec3d_add(normal, geomlib_vec3d_cross(
+            geomlib_vec3d_sub(a, origin), geomlib_vec3d_sub(b, origin)));
+        double mean = ((double)values[i] + values[j]) * 0.5 - values[0];
+        circulation = geomlib_vec3d_add(circulation,
+            geomlib_vec3d_mul(geomlib_vec3d_sub(b, a), mean));
     }
-
-    /* Normalize by area */
-    if (total_area > 1e-10f) {
-        gradient = geomlib_vec3_mul(gradient, 1.0f / total_area);
-    }
-
-    return gradient;
+    double area2 = geomlib_vec3d_length(normal);
+    if (!(area2 > 0)) return (geomlib_vec3){0};
+    geomlib_vec3d gradient = geomlib_vec3d_mul(geomlib_vec3d_cross(circulation, normal),
+                                              2.0 / (area2 * area2));
+    return (geomlib_vec3){(float)gradient.x, (float)gradient.y, (float)gradient.z};
 }
 
 /* Least-squares gradient reconstruction */
@@ -216,64 +194,199 @@ geomlib_vec3 geomlib_gradient_least_squares(
     return gradient;
 }
 
-/* Compute gradient at mesh vertices */
-int geomlib_compute_gradient_scalar(
-    const geomlib_trimesh *mesh,
-    const geomlib_scalar_field *field,
-    geomlib_gradient_method method,
-    geomlib_vector_field *gradient
-) {
-    if (!mesh || !field || !gradient) return GEOMLIB_MESH_ERROR_INVALID;
-    if (field->count != mesh->vertex_count) return GEOMLIB_MESH_ERROR_INVALID;
+static geomlib_vec3d to_double(geomlib_vec3 v) {
+    return (geomlib_vec3d){v.x, v.y, v.z};
+}
 
-    /* Allocate gradient field */
-    *gradient = geomlib_vector_field_create(mesh->vertex_count);
+static geomlib_vec3 to_float(geomlib_vec3d v) {
+    return (geomlib_vec3){(float)v.x, (float)v.y, (float)v.z};
+}
 
-    /* Build half-edge structure for neighbor queries */
-    geomlib_halfedge_mesh hemesh;
-    int result = geomlib_halfedge_build(&hemesh, mesh);
-    if (result != GEOMLIB_MESH_SUCCESS) return result;
+static bool finite_vector(geomlib_vec3 v) {
+    return isfinite(v.x) && isfinite(v.y) && isfinite(v.z);
+}
 
-    /* Compute gradient at each vertex */
-    for (size_t v = 0; v < mesh->vertex_count; v++) {
-        /* Find neighbors */
-        geomlib_vec3 neighbors[64];
-        float neighbor_values[64];
-        size_t neighbor_count = 0;
+static bool valid_surface(const geomlib_trimesh *mesh, size_t count) {
+    if (!mesh || mesh->vertex_count != count || count > UINT32_MAX ||
+        mesh->triangle_count > SIZE_MAX / 3 ||
+        (count && !mesh->vertices) || (mesh->triangle_count && !mesh->indices)) return false;
+    for (size_t i = 0; i < count; i++) {
+        if (!finite_vector(mesh->vertices[i])) return false;
+    }
+    for (size_t i = 0; i < mesh->triangle_count * 3; i++) {
+        if (mesh->indices[i] >= count) return false;
+    }
+    return true;
+}
 
-        for (size_t he = 0; he < hemesh.halfedge_count && neighbor_count < 64; he++) {
-            if (hemesh.halfedges[he].vertex == v) {
-                uint32_t next = hemesh.halfedges[he].next;
-                if (next != UINT32_MAX) {
-                    uint32_t neighbor = hemesh.halfedges[next].vertex;
-                    neighbors[neighbor_count] = mesh->vertices[neighbor];
-                    neighbor_values[neighbor_count] = field->values[neighbor] - field->values[v];
-                    neighbor_count++;
+typedef struct surface_triangle {
+    geomlib_vec3d gradients[3];
+    geomlib_vec3d normal;
+    double area;
+} surface_triangle;
+
+static bool triangle_basis(geomlib_vec3 a, geomlib_vec3 b, geomlib_vec3 c,
+                           surface_triangle *triangle) {
+    geomlib_vec3d edge[2] = {geomlib_vec3d_sub(to_double(b), to_double(a)),
+                             geomlib_vec3d_sub(to_double(c), to_double(a))};
+    geomlib_vec3d cross = geomlib_vec3d_cross(edge[0], edge[1]);
+    double length = geomlib_vec3d_length(cross);
+    if (!(length > DBL_EPSILON * geomlib_vec3d_length(edge[0]) * geomlib_vec3d_length(edge[1])))
+        return false;
+    triangle->normal = geomlib_vec3d_mul(cross, 1.0 / length);
+    triangle->area = 0.5 * length;
+    triangle->gradients[1] = geomlib_vec3d_mul(
+        geomlib_vec3d_cross(edge[1], triangle->normal), 1.0 / length);
+    triangle->gradients[2] = geomlib_vec3d_mul(
+        geomlib_vec3d_cross(triangle->normal, edge[0]), 1.0 / length);
+    triangle->gradients[0] = geomlib_vec3d_mul(
+        geomlib_vec3d_add(triangle->gradients[1], triangle->gradients[2]), -1);
+    return true;
+}
+
+static bool valid_gradient_method(geomlib_gradient_method method) {
+    return method == GEOMLIB_GRADIENT_GREEN_GAUSS ||
+           method == GEOMLIB_GRADIENT_GREEN_GAUSS_NODE ||
+           method == GEOMLIB_GRADIENT_LEAST_SQUARES;
+}
+
+static bool valid_scalar_values(const geomlib_scalar_field *field) {
+    if (!field || (field->count && !field->values)) return false;
+    for (size_t i = 0; i < field->count; i++) {
+        if (!isfinite(field->values[i])) return false;
+    }
+    return true;
+}
+
+static bool valid_vector_values(const geomlib_vector_field *field) {
+    if (!field || (field->count && !field->values)) return false;
+    for (size_t i = 0; i < field->count; i++) {
+        if (!finite_vector(field->values[i])) return false;
+    }
+    return true;
+}
+
+typedef enum surface_operator {
+    SURFACE_GRADIENT,
+    SURFACE_DIVERGENCE,
+    SURFACE_CURL,
+    SURFACE_LAPLACIAN
+} surface_operator;
+
+typedef struct surface_accumulator {
+    double area;
+    geomlib_vec3d value;
+} surface_accumulator;
+
+static int compute_surface_operator(const geomlib_trimesh *mesh, size_t count,
+                                    const float *scalars, const geomlib_vec3 *vectors,
+                                    surface_operator operation, float *scalar_out,
+                                    geomlib_vec3 *vector_out) {
+    if (!count) return GEOMLIB_MESH_SUCCESS;
+    surface_accumulator *sums = calloc(count, sizeof(*sums));
+    if (!sums) return GEOMLIB_MESH_ERROR_MEMORY;
+    for (size_t face = 0; face < mesh->triangle_count; face++) {
+        const uint32_t *indices = &mesh->indices[face * 3];
+        surface_triangle triangle;
+        if (!triangle_basis(mesh->vertices[indices[0]], mesh->vertices[indices[1]],
+                            mesh->vertices[indices[2]], &triangle)) continue;
+
+        geomlib_vec3d result = {0};
+        if (scalars) {
+            for (int j = 1; j < 3; j++) {
+                double value = (double)scalars[indices[j]] - scalars[indices[0]];
+                result = geomlib_vec3d_add(result, geomlib_vec3d_mul(triangle.gradients[j], value));
+            }
+        } else {
+            for (int j = 1; j < 3; j++) {
+                geomlib_vec3d value = geomlib_vec3d_sub(to_double(vectors[indices[j]]),
+                                                      to_double(vectors[indices[0]]));
+                geomlib_vec3d basis = triangle.gradients[j];
+                if (operation == SURFACE_DIVERGENCE) {
+                    result.x += geomlib_vec3d_dot(basis, value);
+                } else {
+                    result = geomlib_vec3d_add(result, geomlib_vec3d_cross(basis, value));
                 }
+            }
+            if (operation == SURFACE_CURL) {
+                result = geomlib_vec3d_mul(triangle.normal,
+                    geomlib_vec3d_dot(result, triangle.normal));
             }
         }
 
-        /* Compute gradient based on method */
-        if (method == GEOMLIB_GRADIENT_LEAST_SQUARES) {
-            gradient->values[v] = geomlib_gradient_least_squares(
-                mesh->vertices[v],
-                neighbors,
-                neighbor_values,
-                neighbor_count
-            );
-        } else {
-            /* Green-Gauss (simplified) */
-            gradient->values[v] = geomlib_gradient_least_squares(
-                mesh->vertices[v],
-                neighbors,
-                neighbor_values,
-                neighbor_count
-            );
+        double weight = operation == SURFACE_LAPLACIAN ? triangle.area / 3.0 : triangle.area;
+        for (int j = 0; j < 3; j++) {
+            surface_accumulator *sum = &sums[indices[j]];
+            sum->area += weight;
+            if (operation == SURFACE_LAPLACIAN) {
+                sum->value.x -= triangle.area * geomlib_vec3d_dot(triangle.gradients[j], result);
+            } else {
+                sum->value = geomlib_vec3d_add(sum->value, geomlib_vec3d_mul(result, weight));
+            }
         }
     }
 
-    geomlib_halfedge_free(&hemesh);
+    for (size_t i = 0; i < count; i++) {
+        geomlib_vec3d value = sums[i].area > 0 ? geomlib_vec3d_mul(sums[i].value, 1.0 / sums[i].area)
+                                               : (geomlib_vec3d){0};
+        if (!isfinite(value.x) || fabs(value.x) > FLT_MAX ||
+            !isfinite(value.y) || fabs(value.y) > FLT_MAX ||
+            !isfinite(value.z) || fabs(value.z) > FLT_MAX) {
+            free(sums);
+            return GEOMLIB_MESH_ERROR_INVALID;
+        }
+        sums[i].value = value;
+    }
+    for (size_t i = 0; i < count; i++) {
+        if (scalar_out) scalar_out[i] = (float)sums[i].value.x;
+        else vector_out[i] = to_float(sums[i].value);
+    }
+    free(sums);
     return GEOMLIB_MESH_SUCCESS;
+}
+
+int geomlib_compute_gradient_scalar(const geomlib_trimesh *mesh,
+                                    const geomlib_scalar_field *field,
+                                    geomlib_gradient_method method,
+                                    geomlib_vector_field *gradient) {
+    if (!gradient || !valid_gradient_method(method) || !field ||
+        !valid_surface(mesh, field->count) || !valid_scalar_values(field))
+        return GEOMLIB_MESH_ERROR_INVALID;
+
+    geomlib_vector_field output = geomlib_vector_field_create(field->count);
+    if (field->count && !output.values) return GEOMLIB_MESH_ERROR_MEMORY;
+    int result = compute_surface_operator(mesh, field->count, field->values, NULL,
+                                          SURFACE_GRADIENT, NULL, output.values);
+    if (result == GEOMLIB_MESH_SUCCESS) *gradient = output;
+    else geomlib_vector_field_free(&output);
+    return result;
+}
+
+int geomlib_compute_divergence(const geomlib_trimesh *mesh, const geomlib_vector_field *field,
+                               geomlib_scalar_field *divergence) {
+    if (!field || !divergence || divergence->count != field->count ||
+        (field->count && !divergence->values) || !valid_surface(mesh, field->count) ||
+        !valid_vector_values(field)) return GEOMLIB_MESH_ERROR_INVALID;
+    return compute_surface_operator(mesh, field->count, NULL, field->values,
+                                    SURFACE_DIVERGENCE, divergence->values, NULL);
+}
+
+int geomlib_compute_curl(const geomlib_trimesh *mesh, const geomlib_vector_field *field,
+                         geomlib_vector_field *curl) {
+    if (!field || !curl || curl->count != field->count || (field->count && !curl->values) ||
+        !valid_surface(mesh, field->count) || !valid_vector_values(field))
+        return GEOMLIB_MESH_ERROR_INVALID;
+    return compute_surface_operator(mesh, field->count, NULL, field->values,
+                                    SURFACE_CURL, NULL, curl->values);
+}
+
+int geomlib_compute_laplacian(const geomlib_trimesh *mesh, const geomlib_scalar_field *field,
+                              geomlib_scalar_field *laplacian) {
+    if (!field || !laplacian || laplacian->count != field->count ||
+        (field->count && !laplacian->values) || !valid_surface(mesh, field->count) ||
+        !valid_scalar_values(field)) return GEOMLIB_MESH_ERROR_INVALID;
+    return compute_surface_operator(mesh, field->count, field->values, NULL,
+                                    SURFACE_LAPLACIAN, laplacian->values, NULL);
 }
 
 /* ============================================================================
@@ -304,68 +417,80 @@ float geomlib_interpolate_face_value(
     }
 }
 
-/* Basic barycentric interpolation for triangle */
-static float interpolate_triangle(
-    const geomlib_vec3 *vertices,
-    const float *values,
-    geomlib_vec3 point
-) {
-    /* Compute barycentric coordinates */
-    geomlib_vec3 v0 = vertices[0];
-    geomlib_vec3 v1 = vertices[1];
-    geomlib_vec3 v2 = vertices[2];
+static bool interpolation_weights(const geomlib_trimesh *mesh, size_t count, geomlib_vec3 point,
+                                  uint32_t indices[3], double weights[3]) {
+    if (!finite_vector(point) || !valid_surface(mesh, count)) return false;
 
-    geomlib_vec3 e0 = geomlib_vec3_sub(v1, v0);
-    geomlib_vec3 e1 = geomlib_vec3_sub(v2, v0);
-    geomlib_vec3 e2 = geomlib_vec3_sub(point, v0);
+    double nearest = DBL_MAX;
+    for (size_t face = 0; face < mesh->triangle_count; face++) {
+        const uint32_t *corners = &mesh->indices[face * 3];
+        geomlib_vec3 a = mesh->vertices[corners[0]], b = mesh->vertices[corners[1]],
+                     c = mesh->vertices[corners[2]];
+        surface_triangle triangle;
+        if (!triangle_basis(a, b, c, &triangle)) continue;
 
-    float d00 = geomlib_vec3_dot(e0, e0);
-    float d01 = geomlib_vec3_dot(e0, e1);
-    float d11 = geomlib_vec3_dot(e1, e1);
-    float d20 = geomlib_vec3_dot(e2, e0);
-    float d21 = geomlib_vec3_dot(e2, e1);
+        geomlib_vec3d origin = to_double(a);
+        geomlib_vec3d edges[2] = {geomlib_vec3d_sub(to_double(b), origin),
+                                  geomlib_vec3d_sub(to_double(c), origin)};
+        geomlib_vec3d query = geomlib_vec3d_sub(to_double(point), origin);
+        double face_weights[3];
+        face_weights[1] = geomlib_vec3d_dot(triangle.gradients[1], query);
+        face_weights[2] = geomlib_vec3d_dot(triangle.gradients[2], query);
+        face_weights[0] = 1 - face_weights[1] - face_weights[2];
+        if (face_weights[0] >= 0 && face_weights[1] >= 0 && face_weights[2] >= 0) {
+            double distance = geomlib_vec3d_dot(triangle.normal, query);
+            if (distance * distance < nearest) {
+                nearest = distance * distance;
+                memcpy(indices, corners, 3 * sizeof(uint32_t));
+                memcpy(weights, face_weights, 3 * sizeof(double));
+            }
+            continue;
+        }
 
-    float denom = d00 * d11 - d01 * d01;
-    if (fabsf(denom) < 1e-10f) return values[0];
-
-    float v = (d11 * d20 - d01 * d21) / denom;
-    float w = (d00 * d21 - d01 * d20) / denom;
-    float u = 1.0f - v - w;
-
-    return u * values[0] + v * values[1] + w * values[2];
+        geomlib_vec3d vertices[3] = {{0}, edges[0], edges[1]};
+        for (int i = 0; i < 3; i++) {
+            int j = (i + 1) % 3;
+            geomlib_vec3d edge = geomlib_vec3d_sub(vertices[j], vertices[i]);
+            geomlib_vec3d offset = geomlib_vec3d_sub(query, vertices[i]);
+            double t = geomlib_vec3d_dot(edge, offset) / geomlib_vec3d_dot(edge, edge);
+            t = fmax(0, fmin(1, t));
+            geomlib_vec3d delta = geomlib_vec3d_sub(offset, geomlib_vec3d_mul(edge, t));
+            double distance = geomlib_vec3d_dot(delta, delta);
+            if (distance < nearest) {
+                nearest = distance;
+                memcpy(indices, corners, 3 * sizeof(uint32_t));
+                weights[i] = 1 - t;
+                weights[j] = t;
+                weights[(j + 1) % 3] = 0;
+            }
+        }
+    }
+    return nearest < DBL_MAX;
 }
 
-float geomlib_interpolate_scalar(
-    const geomlib_trimesh *mesh,
-    const geomlib_scalar_field *field,
-    geomlib_vec3 point,
-    geomlib_interpolation_scheme scheme
-) {
-    if (!mesh || !field) return 0.0f;
+float geomlib_interpolate_scalar(const geomlib_trimesh *mesh, const geomlib_scalar_field *field,
+                                 geomlib_vec3 point, geomlib_interpolation_scheme scheme) {
+    (void)scheme;
+    uint32_t indices[3];
+    double weights[3];
+    if (!field || !field->values || !interpolation_weights(mesh, field->count, point, indices, weights))
+        return 0;
+    double result = 0;
+    for (int i = 0; i < 3; i++) result += weights[i] * field->values[indices[i]];
+    return (float)result;
+}
 
-    /* Find containing triangle (simplified - check all triangles) */
-    for (size_t t = 0; t < mesh->triangle_count; t++) {
-        uint32_t i0 = mesh->indices[t * 3 + 0];
-        uint32_t i1 = mesh->indices[t * 3 + 1];
-        uint32_t i2 = mesh->indices[t * 3 + 2];
-
-        geomlib_vec3 vertices[3] = {
-            mesh->vertices[i0],
-            mesh->vertices[i1],
-            mesh->vertices[i2]
-        };
-
-        float values[3] = {
-            field->values[i0],
-            field->values[i1],
-            field->values[i2]
-        };
-
-        /* Simplified point-in-triangle test */
-        return interpolate_triangle(vertices, values, point);
+geomlib_vec3 geomlib_interpolate_vector(const geomlib_trimesh *mesh, const geomlib_vector_field *field,
+                                        geomlib_vec3 point, geomlib_interpolation_scheme scheme) {
+    (void)scheme;
+    uint32_t indices[3];
+    double weights[3];
+    geomlib_vec3d result = {0};
+    if (field && field->values && interpolation_weights(mesh, field->count, point, indices, weights)) {
+        for (int i = 0; i < 3; i++) result = geomlib_vec3d_add(result,
+            geomlib_vec3d_mul(to_double(field->values[indices[i]]), weights[i]));
     }
-
-    return 0.0f;
+    return to_float(result);
 }
 
 /* ============================================================================
@@ -386,26 +511,54 @@ void geomlib_streamline_free(geomlib_streamline *streamline) {
     memset(streamline, 0, sizeof(geomlib_streamline));
 }
 
-/* Interpolate velocity at point (simplified) */
+/* Barycentric interpolation inside the containing triangle, with a nearest-vertex fallback. */
 static geomlib_vec3 interpolate_velocity(
     const geomlib_trimesh *mesh,
     const geomlib_vector_field *velocity,
     geomlib_vec3 point
 ) {
-    /* Simplified: return velocity of nearest vertex */
-    float min_dist = FLT_MAX;
-    geomlib_vec3 result = geomlib_vec3_create(0.0f, 0.0f, 0.0f);
-
-    for (size_t v = 0; v < mesh->vertex_count && v < velocity->count; v++) {
-        geomlib_vec3 diff = geomlib_vec3_sub(point, mesh->vertices[v]);
-        float dist = geomlib_vec3_length(diff);
-        if (dist < min_dist) {
-            min_dist = dist;
-            result = velocity->values[v];
-        }
+    size_t limit = mesh->vertex_count < velocity->count ? mesh->vertex_count : velocity->count;
+    for (size_t t = 0; mesh->indices && t < mesh->triangle_count; t++) {
+        uint32_t i0 = mesh->indices[t * 3], i1 = mesh->indices[t * 3 + 1],
+                 i2 = mesh->indices[t * 3 + 2];
+        if (i0 >= limit || i1 >= limit || i2 >= limit) continue;
+        geomlib_vec3d p0 = {mesh->vertices[i0].x, mesh->vertices[i0].y, mesh->vertices[i0].z};
+        geomlib_vec3d e1 = geomlib_vec3d_sub(
+            (geomlib_vec3d){mesh->vertices[i1].x, mesh->vertices[i1].y, mesh->vertices[i1].z}, p0);
+        geomlib_vec3d e2 = geomlib_vec3d_sub(
+            (geomlib_vec3d){mesh->vertices[i2].x, mesh->vertices[i2].y, mesh->vertices[i2].z}, p0);
+        geomlib_vec3d w = geomlib_vec3d_sub((geomlib_vec3d){point.x, point.y, point.z}, p0);
+        double d00 = geomlib_vec3d_dot(e1, e1);
+        double d01 = geomlib_vec3d_dot(e1, e2);
+        double d11 = geomlib_vec3d_dot(e2, e2);
+        double denominator = d00 * d11 - d01 * d01;
+        if (!(fabs(denominator) > 1e-20)) continue;
+        double d20 = geomlib_vec3d_dot(w, e1);
+        double d21 = geomlib_vec3d_dot(w, e2);
+        double v = (d11 * d20 - d01 * d21) / denominator;
+        double wb = (d00 * d21 - d01 * d20) / denominator;
+        double u = 1.0 - v - wb;
+        const double tolerance = -1e-4;
+        if (u < tolerance || v < tolerance || wb < tolerance) continue;
+        geomlib_vec3d result = geomlib_vec3d_mul((geomlib_vec3d){
+            velocity->values[i0].x, velocity->values[i0].y, velocity->values[i0].z}, u);
+        result = geomlib_vec3d_add(result, geomlib_vec3d_mul((geomlib_vec3d){
+            velocity->values[i1].x, velocity->values[i1].y, velocity->values[i1].z}, v));
+        result = geomlib_vec3d_add(result, geomlib_vec3d_mul((geomlib_vec3d){
+            velocity->values[i2].x, velocity->values[i2].y, velocity->values[i2].z}, wb));
+        return (geomlib_vec3){(float)result.x, (float)result.y, (float)result.z};
     }
 
-    return result;
+    float min_distance = FLT_MAX;
+    geomlib_vec3 nearest = {0, 0, 0};
+    for (size_t v = 0; v < limit; v++) {
+        float distance = geomlib_vec3_length(geomlib_vec3_sub(point, mesh->vertices[v]));
+        if (distance < min_distance) {
+            min_distance = distance;
+            nearest = velocity->values[v];
+        }
+    }
+    return nearest;
 }
 
 int geomlib_trace_streamline(
@@ -518,65 +671,57 @@ geomlib_cfd_quality_thresholds geomlib_cfd_quality_thresholds_default(void) {
     return thresholds;
 }
 
-geomlib_cfd_quality geomlib_compute_cfd_quality(
-    const geomlib_tetramesh *mesh,
-    uint32_t tet_idx,
-    const geomlib_cfd_quality_thresholds *thresholds
-) {
-    geomlib_cfd_quality quality;
-    memset(&quality, 0, sizeof(quality));
-
-    if (!mesh || tet_idx >= mesh->tetrahedron_count) {
-        return quality;
+static geomlib_cfd_quality quality_from_fvm(const geomlib_fvm_mesh *fvm, size_t cell,
+                                             const geomlib_cfd_quality_thresholds *thresholds) {
+    geomlib_cfd_quality quality = {0};
+    const geomlib_tetramesh *mesh = fvm->tetramesh;
+    const uint32_t *vertices = mesh->tetrahedra[cell].vertices;
+    double lengths[6], mean = 0.0;
+    int edge = 0;
+    for (int i = 0; i < 4; i++) {
+        for (int j = i + 1; j < 4; j++) {
+            geomlib_vec3d a = to_double(mesh->vertices[vertices[i]]);
+            geomlib_vec3d b = to_double(mesh->vertices[vertices[j]]);
+            lengths[edge] = geomlib_vec3d_length(geomlib_vec3d_sub(b, a));
+            mean += lengths[edge++];
+        }
     }
-
-    geomlib_tetrahedron *tet = &mesh->tetrahedra[tet_idx];
-    geomlib_vec3 v0 = mesh->vertices[tet->vertices[0]];
-    geomlib_vec3 v1 = mesh->vertices[tet->vertices[1]];
-    geomlib_vec3 v2 = mesh->vertices[tet->vertices[2]];
-    geomlib_vec3 v3 = mesh->vertices[tet->vertices[3]];
-
-    /* Compute centroid */
-    geomlib_vec3 centroid = geomlib_tetrahedron_centroid(v0, v1, v2, v3);
-
-    /* Skewness: deviation from equilateral */
-    float avg_edge = 0.0f;
-    float max_edge = 0.0f;
-    float edges[6];
-    edges[0] = geomlib_vec3_length(geomlib_vec3_sub(v1, v0));
-    edges[1] = geomlib_vec3_length(geomlib_vec3_sub(v2, v0));
-    edges[2] = geomlib_vec3_length(geomlib_vec3_sub(v3, v0));
-    edges[3] = geomlib_vec3_length(geomlib_vec3_sub(v2, v1));
-    edges[4] = geomlib_vec3_length(geomlib_vec3_sub(v3, v1));
-    edges[5] = geomlib_vec3_length(geomlib_vec3_sub(v3, v2));
-
+    mean /= 6;
+    double variance = 0;
     for (int i = 0; i < 6; i++) {
-        avg_edge += edges[i];
-        if (edges[i] > max_edge) max_edge = edges[i];
+        double difference = lengths[i] - mean;
+        variance += difference * difference;
     }
-    avg_edge /= 6.0f;
-
-    /* Skewness based on edge variation */
-    float edge_variation = 0.0f;
-    for (int i = 0; i < 6; i++) {
-        float diff = edges[i] - avg_edge;
-        edge_variation += diff * diff;
+    quality.skewness = (float)fmin(1.0, sqrt(variance / 6) / mean);
+    quality.expansion_ratio = 1;
+    for (uint32_t i = 0; i < fvm->cell_face_count[cell]; i++) {
+        uint32_t index = fvm->cell_faces[cell][i];
+        const geomlib_fvm_face *face = &fvm->faces[index];
+        if (face->cell_right == UINT32_MAX) continue;
+        uint32_t other = face->cell_left == cell ? face->cell_right : face->cell_left;
+        geomlib_vec3d delta = geomlib_vec3d_sub(to_double(fvm->cell_centers[other]),
+                                              to_double(fvm->cell_centers[cell]));
+        double distance = geomlib_vec3d_length(delta);
+        double alignment = distance > 0 ? fabs(geomlib_vec3d_dot(to_double(face->normal), delta)) / distance : 0;
+        float angle = (float)(acos(fmin(1, alignment)) * (180 / M_PI));
+        quality.non_orthogonality = fmaxf(quality.non_orthogonality, angle);
+        double volume = fvm->cell_volumes[cell], neighbor = fvm->cell_volumes[other];
+        double ratio = fmax(volume, neighbor) / fmin(volume, neighbor);
+        quality.expansion_ratio = fmaxf(quality.expansion_ratio, ratio > FLT_MAX ? INFINITY : (float)ratio);
     }
-    edge_variation = sqrtf(edge_variation / 6.0f);
-    quality.skewness = (avg_edge > 1e-10f) ? (edge_variation / avg_edge) : 1.0f;
+    quality.is_valid = quality.skewness <= thresholds->max_skewness &&
+                       quality.non_orthogonality <= thresholds->max_non_orthogonality &&
+                       quality.expansion_ratio <= thresholds->max_expansion_ratio;
+    return quality;
+}
 
-    /* Non-orthogonality (simplified) */
-    quality.non_orthogonality = 0.0f;  /* Would require neighbor info */
-
-    /* Expansion ratio (simplified) */
-    quality.expansion_ratio = 1.0f;  /* Would require neighbor volumes */
-
-    /* Face flatness */
-    quality.face_flatness = 0.0f;  /* All faces are triangular */
-
-    /* Check validity */
-    quality.is_valid = (quality.skewness <= thresholds->max_skewness);
-
+geomlib_cfd_quality geomlib_compute_cfd_quality(const geomlib_tetramesh *mesh, uint32_t tet_idx,
+                                               const geomlib_cfd_quality_thresholds *thresholds) {
+    if (!mesh || !thresholds || tet_idx >= mesh->tetrahedron_count) return (geomlib_cfd_quality){0};
+    geomlib_fvm_mesh fvm = {0};
+    if (geomlib_fvm_build(&fvm, mesh) != GEOMLIB_MESH_SUCCESS) return (geomlib_cfd_quality){0};
+    geomlib_cfd_quality quality = quality_from_fvm(&fvm, tet_idx, thresholds);
+    geomlib_fvm_free(&fvm);
     return quality;
 }
 
@@ -634,334 +779,210 @@ int geomlib_advect_particles(
     return GEOMLIB_MESH_SUCCESS;
 }
 
-/* Stubs for unimplemented functions */
-int geomlib_fvm_build(geomlib_fvm_mesh *fvm, const geomlib_tetramesh *tetramesh) {
-    (void)fvm; (void)tetramesh;
+typedef struct cfd_tetrahedron {
+    geomlib_vec3d corners[4];
+    geomlib_vec3d cofactors[3];
+    double determinant;
+} cfd_tetrahedron;
+
+static bool valid_volume_mesh(const geomlib_tetramesh *mesh) {
+    return mesh && mesh->vertex_count <= UINT32_MAX &&
+           mesh->tetrahedron_count <= UINT32_MAX / 4 &&
+           (!mesh->vertex_count || mesh->vertices) &&
+           (!mesh->tetrahedron_count || mesh->tetrahedra);
+}
+
+static int tetrahedron_basis(const geomlib_tetramesh *mesh, size_t cell, cfd_tetrahedron *tetra) {
+    for (int i = 0; i < 4; i++) {
+        uint32_t index = mesh->tetrahedra[cell].vertices[i];
+        if (index >= mesh->vertex_count || !finite_vector(mesh->vertices[index]))
+            return GEOMLIB_MESH_ERROR_INVALID;
+        tetra->corners[i] = to_double(mesh->vertices[index]);
+    }
+    geomlib_vec3d edges[3];
+    double scale = 1;
+    for (int i = 0; i < 3; i++) {
+        edges[i] = geomlib_vec3d_sub(tetra->corners[i + 1], tetra->corners[0]);
+        scale *= geomlib_vec3d_length(edges[i]);
+    }
+    for (int i = 0; i < 3; i++)
+        tetra->cofactors[i] = geomlib_vec3d_cross(edges[(i + 1) % 3], edges[(i + 2) % 3]);
+    tetra->determinant = geomlib_vec3d_dot(edges[0], tetra->cofactors[0]);
+    if (!(fabs(tetra->determinant) > DBL_EPSILON * scale)) return GEOMLIB_MESH_ERROR_DEGENERATE;
     return GEOMLIB_MESH_SUCCESS;
+}
+
+int geomlib_compute_gradient_tetra(const geomlib_tetramesh *mesh, const geomlib_scalar_field *field,
+                                   geomlib_gradient_method method, geomlib_vector_field *gradient) {
+    if (!gradient || !valid_volume_mesh(mesh) || !valid_gradient_method(method) ||
+        !field || field->count != mesh->vertex_count || !valid_scalar_values(field))
+        return GEOMLIB_MESH_ERROR_INVALID;
+
+    geomlib_vector_field output = geomlib_vector_field_create(mesh->tetrahedron_count);
+    if (output.count && !output.values) return GEOMLIB_MESH_ERROR_MEMORY;
+    int result = GEOMLIB_MESH_SUCCESS;
+    for (size_t cell = 0; cell < output.count; cell++) {
+        cfd_tetrahedron tetra;
+        result = tetrahedron_basis(mesh, cell, &tetra);
+        if (result != GEOMLIB_MESH_SUCCESS) break;
+
+        const uint32_t *indices = mesh->tetrahedra[cell].vertices;
+        geomlib_vec3d value = {0};
+        for (int i = 0; i < 3; i++) {
+            double difference = (double)field->values[indices[i + 1]] - field->values[indices[0]];
+            value = geomlib_vec3d_add(value, geomlib_vec3d_mul(tetra.cofactors[i], difference));
+        }
+        value = geomlib_vec3d_mul(value, 1.0 / tetra.determinant);
+        if (fabs(value.x) > FLT_MAX || fabs(value.y) > FLT_MAX || fabs(value.z) > FLT_MAX) {
+            result = GEOMLIB_MESH_ERROR_INVALID;
+            break;
+        }
+        output.values[cell] = to_float(value);
+    }
+    if (result == GEOMLIB_MESH_SUCCESS) *gradient = output;
+    else geomlib_vector_field_free(&output);
+    return result;
+}
+
+typedef struct fvm_facet {
+    uint32_t key[3];
+    uint32_t cell;
+    uint32_t opposite;
+} fvm_facet;
+
+static void sort_facet_key(uint32_t key[3]) {
+    for (int i = 1; i < 3; i++) {
+        for (int j = i; j > 0 && key[j - 1] > key[j]; j--) {
+            uint32_t value = key[j - 1];
+            key[j - 1] = key[j];
+            key[j] = value;
+        }
+    }
+}
+
+static int compare_facets(const void *a, const void *b) {
+    const fvm_facet *left = a, *right = b;
+    for (int i = 0; i < 3; i++) {
+        if (left->key[i] != right->key[i]) return left->key[i] < right->key[i] ? -1 : 1;
+    }
+    return (left->cell > right->cell) - (left->cell < right->cell);
+}
+
+static geomlib_vec3d facet_opposite_vertex(const geomlib_tetramesh *mesh, const fvm_facet *facet) {
+    return to_double(mesh->vertices[mesh->tetrahedra[facet->cell].vertices[facet->opposite]]);
+}
+
+static int create_fvm_face(const geomlib_tetramesh *mesh, const fvm_facet *left,
+                           const fvm_facet *right, geomlib_fvm_face *face) {
+    memcpy(face->vertices, left->key, sizeof(left->key));
+    geomlib_vec3d a = to_double(mesh->vertices[left->key[0]]);
+    geomlib_vec3d b = to_double(mesh->vertices[left->key[1]]);
+    geomlib_vec3d c = to_double(mesh->vertices[left->key[2]]);
+    geomlib_vec3d normal = geomlib_vec3d_cross(geomlib_vec3d_sub(b, a), geomlib_vec3d_sub(c, a));
+    double area2 = geomlib_vec3d_length(normal);
+    if (!(area2 > 0) || area2 * 0.5 > FLT_MAX) return GEOMLIB_MESH_ERROR_DEGENERATE;
+    if (geomlib_vec3d_dot(normal, geomlib_vec3d_sub(facet_opposite_vertex(mesh, left), a)) > 0) {
+        face->vertices[1] = left->key[2];
+        face->vertices[2] = left->key[1];
+        normal = geomlib_vec3d_mul(normal, -1);
+    }
+    if (right && !(geomlib_vec3d_dot(normal,
+                  geomlib_vec3d_sub(facet_opposite_vertex(mesh, right), a)) > 0))
+        return GEOMLIB_MESH_ERROR_INVALID;
+
+    face->vertex_count = 3;
+    face->cell_left = left->cell;
+    face->cell_right = right ? right->cell : UINT32_MAX;
+    face->center = to_float(geomlib_vec3d_mul(geomlib_vec3d_add(geomlib_vec3d_add(a, b), c), 1.0 / 3));
+    face->normal = to_float(geomlib_vec3d_mul(normal, 1.0 / area2));
+    face->area = (float)(area2 * 0.5);
+    return face->area > 0 ? GEOMLIB_MESH_SUCCESS : GEOMLIB_MESH_ERROR_DEGENERATE;
+}
+
+int geomlib_fvm_build(geomlib_fvm_mesh *fvm, const geomlib_tetramesh *mesh) {
+    if (!fvm || !valid_volume_mesh(mesh)) return GEOMLIB_MESH_ERROR_INVALID;
+    geomlib_fvm_mesh output = {0};
+    output.tetramesh = (geomlib_tetramesh*)mesh;
+    output.cell_count = mesh->tetrahedron_count;
+    size_t cells = output.cell_count;
+    if (!cells) {
+        *fvm = output;
+        return GEOMLIB_MESH_SUCCESS;
+    }
+    if (cells > SIZE_MAX / (4 * sizeof(fvm_facet)) ||
+        cells > SIZE_MAX / (4 * sizeof(geomlib_fvm_face))) return GEOMLIB_MESH_ERROR_MEMORY;
+
+    size_t facets = cells * 4;
+    fvm_facet *entries = malloc(facets * sizeof(*entries));
+    output.faces = calloc(facets, sizeof(*output.faces));
+    output.cell_centers = malloc(cells * sizeof(*output.cell_centers));
+    output.cell_volumes = malloc(cells * sizeof(*output.cell_volumes));
+    output.cell_faces = calloc(cells, sizeof(*output.cell_faces));
+    output.cell_face_count = malloc(cells * sizeof(*output.cell_face_count));
+    if (output.cell_faces) output.cell_faces[0] = malloc(facets * sizeof(uint32_t));
+    int result = GEOMLIB_MESH_ERROR_MEMORY;
+    if (!entries || !output.faces || !output.cell_centers || !output.cell_volumes ||
+        !output.cell_faces || !output.cell_faces[0] || !output.cell_face_count) goto finish;
+
+    for (size_t cell = 0; cell < cells; cell++) {
+        cfd_tetrahedron tetra;
+        result = tetrahedron_basis(mesh, cell, &tetra);
+        if (result != GEOMLIB_MESH_SUCCESS) goto finish;
+        double volume = fabs(tetra.determinant) / 6;
+        if (volume > FLT_MAX || (float)volume == 0) {
+            result = GEOMLIB_MESH_ERROR_DEGENERATE;
+            goto finish;
+        }
+        output.cell_volumes[cell] = (float)volume;
+        geomlib_vec3d center = {0};
+        for (int j = 0; j < 4; j++) center = geomlib_vec3d_add(center, tetra.corners[j]);
+        output.cell_centers[cell] = to_float(geomlib_vec3d_mul(center, 0.25));
+        output.cell_faces[cell] = output.cell_faces[0] + cell * 4;
+        output.cell_face_count[cell] = 4;
+        for (uint32_t opposite = 0; opposite < 4; opposite++) {
+            fvm_facet *entry = &entries[cell * 4 + opposite];
+            entry->cell = (uint32_t)cell;
+            entry->opposite = opposite;
+            for (int k = 0; k < 3; k++)
+                entry->key[k] = mesh->tetrahedra[cell].vertices[(opposite + k + 1) % 4];
+            sort_facet_key(entry->key);
+        }
+    }
+
+    qsort(entries, facets, sizeof(*entries), compare_facets);
+    for (size_t start = 0; start < facets;) {
+        size_t end = start + 1;
+        while (end < facets && memcmp(entries[start].key, entries[end].key, sizeof(entries[0].key)) == 0)
+            end++;
+        if (end - start > 2) {
+            result = GEOMLIB_MESH_ERROR_INVALID;
+            goto finish;
+        }
+        const fvm_facet *right = end - start == 2 ? &entries[start + 1] : NULL;
+        result = create_fvm_face(mesh, &entries[start], right, &output.faces[output.face_count]);
+        if (result != GEOMLIB_MESH_SUCCESS) goto finish;
+        for (size_t i = start; i < end; i++)
+            output.cell_faces[entries[i].cell][entries[i].opposite] = (uint32_t)output.face_count;
+        output.face_count++;
+        start = end;
+    }
+
+finish:
+    free(entries);
+    if (result == GEOMLIB_MESH_SUCCESS) *fvm = output;
+    else geomlib_fvm_free(&output);
+    return result;
 }
 
 void geomlib_fvm_free(geomlib_fvm_mesh *fvm) {
-    (void)fvm;
-}
-
-int geomlib_compute_gradient_tetra(
-    const geomlib_tetramesh *mesh,
-    const geomlib_scalar_field *field,
-    geomlib_gradient_method method,
-    geomlib_vector_field *gradient
-) {
-    (void)mesh; (void)field; (void)method; (void)gradient;
-    return GEOMLIB_MESH_SUCCESS;
-}
-
-int geomlib_compute_divergence(
-    const geomlib_trimesh *mesh,
-    const geomlib_vector_field *field,
-    geomlib_scalar_field *divergence
-) {
-    if (!mesh || !field || !divergence) {
-        return GEOMLIB_MESH_ERROR_INVALID;
-    }
-
-    if (field->count != mesh->vertex_count || divergence->count != mesh->vertex_count) {
-        return GEOMLIB_MESH_ERROR_INVALID;
-    }
-
-    /* Build vertex adjacency for neighbor access */
-    geomlib_vertex_adjacency adj = geomlib_build_vertex_adjacency(mesh);
-
-    /* Compute divergence at each vertex using Green-Gauss */
-    for (size_t v = 0; v < mesh->vertex_count; v++) {
-        float div_sum = 0.0f;
-        float total_area = 0.0f;
-
-        /* Accumulate over adjacent triangles */
-        for (uint32_t i = 0; i < adj.face_counts[v]; i++) {
-            uint32_t tri = adj.faces[v][i];
-
-            /* Get triangle vertices */
-            uint32_t v0 = mesh->indices[tri * 3 + 0];
-            uint32_t v1 = mesh->indices[tri * 3 + 1];
-            uint32_t v2 = mesh->indices[tri * 3 + 2];
-
-            geomlib_vec3 p0 = mesh->vertices[v0];
-            geomlib_vec3 p1 = mesh->vertices[v1];
-            geomlib_vec3 p2 = mesh->vertices[v2];
-
-            /* Triangle area and normal */
-            geomlib_vec3 e1 = geomlib_vec3_sub(p1, p0);
-            geomlib_vec3 e2 = geomlib_vec3_sub(p2, p0);
-            geomlib_vec3 cross = geomlib_vec3_cross(e1, e2);
-            float area = geomlib_vec3_length(cross) * 0.5f;
-            geomlib_vec3 normal = geomlib_vec3_normalize(cross);
-
-            /* Average field value at triangle */
-            geomlib_vec3 f0 = field->values[v0];
-            geomlib_vec3 f1 = field->values[v1];
-            geomlib_vec3 f2 = field->values[v2];
-            geomlib_vec3 f_avg = geomlib_vec3_create(
-                (f0.x + f1.x + f2.x) / 3.0f,
-                (f0.y + f1.y + f2.y) / 3.0f,
-                (f0.z + f1.z + f2.z) / 3.0f
-            );
-
-            /* Green-Gauss: ∇·F ≈ (1/V) ∫ F·n dS */
-            float contrib = geomlib_vec3_dot(f_avg, normal) * area;
-            div_sum += contrib;
-            total_area += area;
-        }
-
-        /* Normalize by total area (approximation of volume) */
-        if (total_area > 1e-6f) {
-            divergence->values[v] = div_sum / total_area;
-        } else {
-            divergence->values[v] = 0.0f;
-        }
-    }
-
-    geomlib_vertex_adjacency_free(&adj);
-    return GEOMLIB_MESH_SUCCESS;
-}
-
-int geomlib_compute_curl(
-    const geomlib_trimesh *mesh,
-    const geomlib_vector_field *field,
-    geomlib_vector_field *curl
-) {
-    if (!mesh || !field || !curl) {
-        return GEOMLIB_MESH_ERROR_INVALID;
-    }
-
-    if (field->count != mesh->vertex_count || curl->count != mesh->vertex_count) {
-        return GEOMLIB_MESH_ERROR_INVALID;
-    }
-
-    /* Build vertex adjacency */
-    geomlib_vertex_adjacency adj = geomlib_build_vertex_adjacency(mesh);
-
-    /* Compute curl at each vertex using Stokes' theorem */
-    for (size_t v = 0; v < mesh->vertex_count; v++) {
-        geomlib_vec3 curl_sum = geomlib_vec3_create(0, 0, 0);
-        float total_area = 0.0f;
-
-        /* Accumulate over adjacent triangles */
-        for (uint32_t i = 0; i < adj.face_counts[v]; i++) {
-            uint32_t tri = adj.faces[v][i];
-
-            /* Get triangle vertices */
-            uint32_t v0 = mesh->indices[tri * 3 + 0];
-            uint32_t v1 = mesh->indices[tri * 3 + 1];
-            uint32_t v2 = mesh->indices[tri * 3 + 2];
-
-            geomlib_vec3 p0 = mesh->vertices[v0];
-            geomlib_vec3 p1 = mesh->vertices[v1];
-            geomlib_vec3 p2 = mesh->vertices[v2];
-
-            /* Triangle normal and area */
-            geomlib_vec3 e1 = geomlib_vec3_sub(p1, p0);
-            geomlib_vec3 e2 = geomlib_vec3_sub(p2, p0);
-            geomlib_vec3 cross = geomlib_vec3_cross(e1, e2);
-            float area = geomlib_vec3_length(cross) * 0.5f;
-            geomlib_vec3 normal = geomlib_vec3_normalize(cross);
-
-            /* Field values */
-            geomlib_vec3 f0 = field->values[v0];
-            geomlib_vec3 f1 = field->values[v1];
-            geomlib_vec3 f2 = field->values[v2];
-
-            /* Stokes' theorem: ∫(∇×F)·n dS = ∮ F·dl */
-            /* Approximate with line integral around triangle */
-            geomlib_vec3 e01 = geomlib_vec3_sub(p1, p0);
-            geomlib_vec3 e12 = geomlib_vec3_sub(p2, p1);
-            geomlib_vec3 e20 = geomlib_vec3_sub(p0, p2);
-
-            geomlib_vec3 f01 = geomlib_vec3_create(
-                (f0.x + f1.x) * 0.5f,
-                (f0.y + f1.y) * 0.5f,
-                (f0.z + f1.z) * 0.5f
-            );
-            geomlib_vec3 f12 = geomlib_vec3_create(
-                (f1.x + f2.x) * 0.5f,
-                (f1.y + f2.y) * 0.5f,
-                (f1.z + f2.z) * 0.5f
-            );
-            geomlib_vec3 f20 = geomlib_vec3_create(
-                (f2.x + f0.x) * 0.5f,
-                (f2.y + f0.y) * 0.5f,
-                (f2.z + f0.z) * 0.5f
-            );
-
-            float line_integral =
-                geomlib_vec3_dot(f01, e01) +
-                geomlib_vec3_dot(f12, e12) +
-                geomlib_vec3_dot(f20, e20);
-
-            /* Curl component along normal */
-            geomlib_vec3 curl_contrib = geomlib_vec3_create(
-                normal.x * line_integral,
-                normal.y * line_integral,
-                normal.z * line_integral
-            );
-
-            curl_sum = geomlib_vec3_add(curl_sum, curl_contrib);
-            total_area += area;
-        }
-
-        /* Normalize by total area */
-        if (total_area > 1e-6f) {
-            curl->values[v] = geomlib_vec3_create(
-                curl_sum.x / total_area,
-                curl_sum.y / total_area,
-                curl_sum.z / total_area
-            );
-        } else {
-            curl->values[v] = geomlib_vec3_create(0, 0, 0);
-        }
-    }
-
-    geomlib_vertex_adjacency_free(&adj);
-    return GEOMLIB_MESH_SUCCESS;
-}
-
-int geomlib_compute_laplacian(
-    const geomlib_trimesh *mesh,
-    const geomlib_scalar_field *field,
-    geomlib_scalar_field *laplacian
-) {
-    if (!mesh || !field || !laplacian) {
-        return GEOMLIB_MESH_ERROR_INVALID;
-    }
-
-    if (field->count != mesh->vertex_count || laplacian->count != mesh->vertex_count) {
-        return GEOMLIB_MESH_ERROR_INVALID;
-    }
-
-    /* Build vertex adjacency for neighbor access */
-    geomlib_vertex_adjacency adj = geomlib_build_vertex_adjacency(mesh);
-
-    /* Compute Laplacian using cotangent weights (discrete Laplace-Beltrami) */
-    for (size_t v = 0; v < mesh->vertex_count; v++) {
-        float laplacian_sum = 0.0f;
-        float weight_sum = 0.0f;
-
-        geomlib_vec3 v_pos = mesh->vertices[v];
-        float v_value = field->values[v];
-
-        /* Accumulate contributions from neighbors */
-        for (uint32_t i = 0; i < adj.neighbor_counts[v]; i++) {
-            uint32_t neighbor = adj.neighbors[v][i];
-            geomlib_vec3 n_pos = mesh->vertices[neighbor];
-            float n_value = field->values[neighbor];
-
-            /* Compute cotangent weight */
-            /* For simplicity, use uniform weight (proper cotangent requires angle computation) */
-            float dist = geomlib_vec3_length(geomlib_vec3_sub(n_pos, v_pos));
-            float weight = (dist > 1e-6f) ? (1.0f / dist) : 0.0f;
-
-            /* Laplacian: ∇²f ≈ Σ w_i (f_i - f_0) / Σ w_i */
-            laplacian_sum += weight * (n_value - v_value);
-            weight_sum += weight;
-        }
-
-        /* Normalize */
-        if (weight_sum > 1e-6f) {
-            laplacian->values[v] = laplacian_sum / weight_sum;
-        } else {
-            laplacian->values[v] = 0.0f;
-        }
-    }
-
-    geomlib_vertex_adjacency_free(&adj);
-    return GEOMLIB_MESH_SUCCESS;
-}
-
-geomlib_vec3 geomlib_interpolate_vector(
-    const geomlib_trimesh *mesh,
-    const geomlib_vector_field *field,
-    geomlib_vec3 point,
-    geomlib_interpolation_scheme scheme
-) {
-    if (!mesh || !field || field->count != mesh->vertex_count) {
-        return geomlib_vec3_create(0.0f, 0.0f, 0.0f);
-    }
-
-    /* Simple scheme: find nearest triangle and use barycentric interpolation */
-    (void)scheme;  /* Ignore scheme for now, always use linear */
-
-    /* Find triangle containing point (brute force for now) */
-    float min_dist = FLT_MAX;
-    uint32_t closest_tri = 0;
-
-    for (size_t i = 0; i < mesh->triangle_count; i++) {
-        uint32_t v0 = mesh->indices[i * 3 + 0];
-        uint32_t v1 = mesh->indices[i * 3 + 1];
-        uint32_t v2 = mesh->indices[i * 3 + 2];
-
-        geomlib_vec3 p0 = mesh->vertices[v0];
-        geomlib_vec3 p1 = mesh->vertices[v1];
-        geomlib_vec3 p2 = mesh->vertices[v2];
-
-        /* Compute triangle centroid and distance to point */
-        geomlib_vec3 centroid = geomlib_vec3_create(
-            (p0.x + p1.x + p2.x) / 3.0f,
-            (p0.y + p1.y + p2.y) / 3.0f,
-            (p0.z + p1.z + p2.z) / 3.0f
-        );
-
-        float dist = geomlib_vec3_length(geomlib_vec3_sub(point, centroid));
-        if (dist < min_dist) {
-            min_dist = dist;
-            closest_tri = (uint32_t)i;
-        }
-    }
-
-    /* Get vertices of closest triangle */
-    uint32_t v0 = mesh->indices[closest_tri * 3 + 0];
-    uint32_t v1 = mesh->indices[closest_tri * 3 + 1];
-    uint32_t v2 = mesh->indices[closest_tri * 3 + 2];
-
-    geomlib_vec3 p0 = mesh->vertices[v0];
-    geomlib_vec3 p1 = mesh->vertices[v1];
-    geomlib_vec3 p2 = mesh->vertices[v2];
-
-    /* Compute barycentric coordinates */
-    geomlib_vec3 v0v1 = geomlib_vec3_sub(p1, p0);
-    geomlib_vec3 v0v2 = geomlib_vec3_sub(p2, p0);
-    geomlib_vec3 v0p = geomlib_vec3_sub(point, p0);
-
-    float d00 = geomlib_vec3_dot(v0v1, v0v1);
-    float d01 = geomlib_vec3_dot(v0v1, v0v2);
-    float d11 = geomlib_vec3_dot(v0v2, v0v2);
-    float d20 = geomlib_vec3_dot(v0p, v0v1);
-    float d21 = geomlib_vec3_dot(v0p, v0v2);
-
-    float denom = d00 * d11 - d01 * d01;
-    if (fabsf(denom) < 1e-6f) {
-        /* Degenerate triangle, use average */
-        geomlib_vec3 f0 = field->values[v0];
-        geomlib_vec3 f1 = field->values[v1];
-        geomlib_vec3 f2 = field->values[v2];
-        return geomlib_vec3_create(
-            (f0.x + f1.x + f2.x) / 3.0f,
-            (f0.y + f1.y + f2.y) / 3.0f,
-            (f0.z + f1.z + f2.z) / 3.0f
-        );
-    }
-
-    float b1 = (d11 * d20 - d01 * d21) / denom;
-    float b2 = (d00 * d21 - d01 * d20) / denom;
-    float b0 = 1.0f - b1 - b2;
-
-    /* Interpolate vector field values */
-    geomlib_vec3 f0 = field->values[v0];
-    geomlib_vec3 f1 = field->values[v1];
-    geomlib_vec3 f2 = field->values[v2];
-
-    return geomlib_vec3_create(
-        b0 * f0.x + b1 * f1.x + b2 * f2.x,
-        b0 * f0.y + b1 * f1.y + b2 * f2.y,
-        b0 * f0.z + b1 * f1.z + b2 * f2.z
-    );
+    if (!fvm) return;
+    free(fvm->faces);
+    free(fvm->cell_centers);
+    free(fvm->cell_volumes);
+    if (fvm->cell_faces) free(fvm->cell_faces[0]);
+    free(fvm->cell_faces);
+    free(fvm->cell_face_count);
+    memset(fvm, 0, sizeof(*fvm));
 }
 
 int geomlib_generate_streamlines(
@@ -988,14 +1009,16 @@ bool geomlib_check_cfd_mesh_quality(
     const geomlib_cfd_quality_thresholds *thresholds,
     size_t *failed_count
 ) {
+    if (failed_count) *failed_count = mesh ? mesh->tetrahedron_count : 0;
     if (!mesh || !thresholds) return false;
 
+    geomlib_fvm_mesh fvm = {0};
+    if (geomlib_fvm_build(&fvm, mesh) != GEOMLIB_MESH_SUCCESS) return false;
     size_t failures = 0;
-    for (size_t i = 0; i < mesh->tetrahedron_count; i++) {
-        geomlib_cfd_quality q = geomlib_compute_cfd_quality(mesh, i, thresholds);
-        if (!q.is_valid) failures++;
+    for (size_t i = 0; i < fvm.cell_count; i++) {
+        if (!quality_from_fvm(&fvm, i, thresholds).is_valid) failures++;
     }
-
+    geomlib_fvm_free(&fvm);
     if (failed_count) *failed_count = failures;
-    return (failures == 0);
+    return failures == 0;
 }

@@ -211,6 +211,7 @@ int geomlib_detect_face_orientation(
     const geomlib_bvh *bvh,
     int ray_samples
 ) {
+    (void)bvh;
     if (!mesh || face_idx >= mesh->triangle_count) return 0;
 
     // Get face vertices

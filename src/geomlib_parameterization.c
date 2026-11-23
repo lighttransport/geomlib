@@ -562,7 +562,6 @@ void geomlib_compute_param_stats(
 
     memset(stats, 0, sizeof(geomlib_param_stats));
 
-    float angle_error_sum = 0.0f;
     float area_error_sum = 0.0f;
 
     for (size_t t = 0; t < mesh->triangle_count; t++) {

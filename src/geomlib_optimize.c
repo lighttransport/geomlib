@@ -583,148 +583,224 @@ void geomlib_weld_result_free(geomlib_weld_result *result) {
  * Vertex Fetch Optimization
  * ============================================================================ */
 
-int geomlib_optimize_vertex_fetch(geomlib_trimesh *mesh) {
-    if (!mesh) {
+int geomlib_reorder_vertices(geomlib_trimesh *mesh, const uint32_t *triangle_order) {
+    if (!mesh || mesh->vertex_count > UINT32_MAX || mesh->triangle_count > UINT32_MAX ||
+        (mesh->vertex_count && !mesh->vertices) ||
+        (mesh->triangle_count && !mesh->indices) ||
+        mesh->vertex_count > SIZE_MAX / sizeof(geomlib_vec3) ||
+        mesh->triangle_count > SIZE_MAX / (3 * sizeof(uint32_t)))
         return GEOMLIB_MESH_ERROR_INVALID;
-    }
+    if (!mesh->triangle_count) return GEOMLIB_MESH_SUCCESS;
+    if (!mesh->vertex_count) return GEOMLIB_MESH_ERROR_INVALID;
 
-    /* Build vertex usage map */
-    uint32_t *vertex_first_use = (uint32_t*)malloc(mesh->vertex_count * sizeof(uint32_t));
-    bool *vertex_used = (bool*)calloc(mesh->vertex_count, sizeof(bool));
+    uint32_t *remap = malloc(mesh->vertex_count * sizeof(uint32_t));
+    bool *seen = triangle_order ? calloc(mesh->triangle_count, sizeof(bool)) : NULL;
+    geomlib_vec3 *vertices = malloc(mesh->vertex_count * sizeof(geomlib_vec3));
+    geomlib_vec3 *normals = mesh->normals ? malloc(mesh->vertex_count * sizeof(geomlib_vec3)) : NULL;
+    geomlib_vec2 *texcoords = mesh->texcoords ? malloc(mesh->vertex_count * sizeof(geomlib_vec2)) : NULL;
+    int status = GEOMLIB_MESH_ERROR_MEMORY;
+    if (!remap || (triangle_order && !seen) || !vertices ||
+        (mesh->normals && !normals) || (mesh->texcoords && !texcoords)) goto finish;
 
-    for (size_t i = 0; i < mesh->vertex_count; i++) {
-        vertex_first_use[i] = UINT32_MAX;
-    }
-
-    /* Find first use of each vertex */
+    memset(remap, 0xff, mesh->vertex_count * sizeof(uint32_t));
+    uint32_t next = 0;
+    status = GEOMLIB_MESH_ERROR_INVALID;
     for (size_t i = 0; i < mesh->triangle_count; i++) {
+        size_t triangle = triangle_order ? triangle_order[i] : i;
+        if (triangle >= mesh->triangle_count || (seen && seen[triangle])) goto finish;
+        if (seen) seen[triangle] = true;
         for (int j = 0; j < 3; j++) {
-            uint32_t v = mesh->indices[i * 3 + j];
-            if (!vertex_used[v]) {
-                vertex_first_use[v] = (uint32_t)i;
-                vertex_used[v] = true;
-            }
+            uint32_t vertex = mesh->indices[triangle * 3 + j];
+            if (vertex >= mesh->vertex_count) goto finish;
+            if (remap[vertex] == UINT32_MAX) remap[vertex] = next++;
         }
     }
 
-    /* Build new vertex order */
-    uint32_t *new_order = (uint32_t*)malloc(mesh->vertex_count * sizeof(uint32_t));
-    uint32_t *remap = (uint32_t*)malloc(mesh->vertex_count * sizeof(uint32_t));
-
-    uint32_t new_idx = 0;
-    for (uint32_t first_tri = 0; first_tri < mesh->triangle_count; first_tri++) {
-        for (size_t v = 0; v < mesh->vertex_count; v++) {
-            if (vertex_first_use[v] == first_tri) {
-                new_order[new_idx] = (uint32_t)v;
-                remap[v] = new_idx;
-                new_idx++;
-            }
-        }
-    }
-
-    /* Reorder vertices */
-    geomlib_vec3 *new_vertices = (geomlib_vec3*)malloc(mesh->vertex_count * sizeof(geomlib_vec3));
     for (size_t i = 0; i < mesh->vertex_count; i++) {
-        new_vertices[i] = mesh->vertices[new_order[i]];
+        if (remap[i] == UINT32_MAX) remap[i] = next++;
+        vertices[remap[i]] = mesh->vertices[i];
+        if (normals) normals[remap[i]] = mesh->normals[i];
+        if (texcoords) texcoords[remap[i]] = mesh->texcoords[i];
     }
+    for (size_t i = 0; i < mesh->triangle_count * 3; i++)
+        mesh->indices[i] = remap[mesh->indices[i]];
+    memcpy(mesh->vertices, vertices, mesh->vertex_count * sizeof(geomlib_vec3));
+    if (normals) memcpy(mesh->normals, normals, mesh->vertex_count * sizeof(geomlib_vec3));
+    if (texcoords) memcpy(mesh->texcoords, texcoords, mesh->vertex_count * sizeof(geomlib_vec2));
+    status = GEOMLIB_MESH_SUCCESS;
 
-    free(mesh->vertices);
-    mesh->vertices = new_vertices;
-
-    /* Update indices */
-    for (size_t i = 0; i < mesh->triangle_count; i++) {
-        mesh->indices[i * 3 + 0] = remap[mesh->indices[i * 3 + 0]];
-        mesh->indices[i * 3 + 1] = remap[mesh->indices[i * 3 + 1]];
-        mesh->indices[i * 3 + 2] = remap[mesh->indices[i * 3 + 2]];
-    }
-
-    /* Cleanup */
-    free(vertex_first_use);
-    free(vertex_used);
-    free(new_order);
+finish:
     free(remap);
+    free(seen);
+    free(vertices);
+    free(normals);
+    free(texcoords);
+    return status;
+}
 
-    return GEOMLIB_MESH_SUCCESS;
+int geomlib_optimize_vertex_fetch(geomlib_trimesh *mesh) {
+    return geomlib_reorder_vertices(mesh, NULL);
 }
 
 /* ============================================================================
  * Overdraw Optimization
  * ============================================================================ */
 
+/* Orthographic projection toward the mesh center, with back-face culling and
+ * per-pixel fragment counting. */
 geomlib_overdraw_stats geomlib_analyze_overdraw(
     const geomlib_trimesh *mesh,
     geomlib_vec3 view_position,
     int resolution
 ) {
-    geomlib_overdraw_stats stats;
-    stats.avg_overdraw = 1.0f;  /* Placeholder */
-    stats.max_overdraw = 1.0f;
-    stats.total_shaded_pixels = 0;
-    stats.visible_pixels = 0;
+    geomlib_overdraw_stats stats = {0};
+    if (!mesh || !mesh->vertices || !mesh->indices || !mesh->triangle_count ||
+        !isfinite(view_position.x) || !isfinite(view_position.y) || !isfinite(view_position.z))
+        return stats;
+    if (resolution < 8) resolution = 8;
+    if (resolution > 2048) resolution = 2048;
+
+    geomlib_aabb bounds = geomlib_trimesh_compute_aabb(mesh);
+    geomlib_vec3 center = geomlib_aabb_center(bounds);
+    geomlib_vec3 forward = geomlib_vec3_sub(center, view_position);
+    float forward_length = geomlib_vec3_length(forward);
+    if (!(forward_length > 1e-9f)) forward = geomlib_vec3_create(0, 0, 1);
+    forward = geomlib_vec3_normalize(forward);
+    geomlib_vec3 up = fabsf(forward.y) < 0.9f ? geomlib_vec3_create(0, 1, 0)
+                                             : geomlib_vec3_create(1, 0, 0);
+    geomlib_vec3 right = geomlib_vec3_normalize(geomlib_vec3_cross(forward, up));
+    up = geomlib_vec3_cross(right, forward);
+
+    double min_x = DBL_MAX, max_x = -DBL_MAX, min_y = DBL_MAX, max_y = -DBL_MAX;
+    for (size_t v = 0; v < mesh->vertex_count; v++) {
+        geomlib_vec3 delta = geomlib_vec3_sub(mesh->vertices[v], view_position);
+        double x = geomlib_vec3_dot(delta, right);
+        double y = geomlib_vec3_dot(delta, up);
+        if (x < min_x) min_x = x;
+        if (x > max_x) max_x = x;
+        if (y < min_y) min_y = y;
+        if (y > max_y) max_y = y;
+    }
+    double span = fmax(max_x - min_x, max_y - min_y);
+    if (!(span > 1e-12)) return stats;
+    double scale = (double)(resolution - 1) / span;
+    double offset_x = (double)(resolution - 1) * 0.5 - 0.5 * (min_x + max_x) * scale;
+    double offset_y = (double)(resolution - 1) * 0.5 - 0.5 * (min_y + max_y) * scale;
+
+    size_t pixels = (size_t)resolution * (size_t)resolution;
+    uint32_t *counts = calloc(pixels, sizeof(*counts));
+    double *screen = malloc(mesh->vertex_count * 2 * sizeof(*screen));
+    if (!counts || !screen) {
+        free(counts);
+        free(screen);
+        return stats;
+    }
+    for (size_t v = 0; v < mesh->vertex_count; v++) {
+        geomlib_vec3 delta = geomlib_vec3_sub(mesh->vertices[v], view_position);
+        screen[v * 2] = geomlib_vec3_dot(delta, right) * scale + offset_x;
+        screen[v * 2 + 1] = geomlib_vec3_dot(delta, up) * scale + offset_y;
+    }
+
+    uint64_t fragments = 0;
+    uint32_t max_count = 0;
+    for (size_t t = 0; t < mesh->triangle_count; t++) {
+        uint32_t i0 = mesh->indices[t * 3], i1 = mesh->indices[t * 3 + 1],
+                 i2 = mesh->indices[t * 3 + 2];
+        if (i0 >= mesh->vertex_count || i1 >= mesh->vertex_count || i2 >= mesh->vertex_count)
+            continue;
+        geomlib_vec3 p0 = mesh->vertices[i0], p1 = mesh->vertices[i1], p2 = mesh->vertices[i2];
+        geomlib_vec3 normal = geomlib_vec3_cross(geomlib_vec3_sub(p1, p0),
+                                                 geomlib_vec3_sub(p2, p0));
+        geomlib_vec3 centroid = geomlib_vec3_mul(
+            geomlib_vec3_add(geomlib_vec3_add(p0, p1), p2), 1.0f / 3.0f);
+        if (geomlib_vec3_dot(normal, geomlib_vec3_sub(view_position, centroid)) <= 0.0f)
+            continue;
+        double x0 = screen[i0 * 2], y0 = screen[i0 * 2 + 1];
+        double x1 = screen[i1 * 2], y1 = screen[i1 * 2 + 1];
+        double x2 = screen[i2 * 2], y2 = screen[i2 * 2 + 1];
+        double area = (x1 - x0) * (y2 - y0) - (y1 - y0) * (x2 - x0);
+        if (fabs(area) < 1e-12) continue;
+        int lo_x = (int)floor(fmin(x0, fmin(x1, x2)));
+        int hi_x = (int)ceil(fmax(x0, fmax(x1, x2)));
+        int lo_y = (int)floor(fmin(y0, fmin(y1, y2)));
+        int hi_y = (int)ceil(fmax(y0, fmax(y1, y2)));
+        if (lo_x < 0) lo_x = 0;
+        if (lo_y < 0) lo_y = 0;
+        if (hi_x > resolution - 1) hi_x = resolution - 1;
+        if (hi_y > resolution - 1) hi_y = resolution - 1;
+        for (int y = lo_y; y <= hi_y; y++) {
+            for (int x = lo_x; x <= hi_x; x++) {
+                double px = x + 0.5, py = y + 0.5;
+                double w0 = (x1 - px) * (y2 - py) - (y1 - py) * (x2 - px);
+                double w1 = (x2 - px) * (y0 - py) - (y2 - py) * (x0 - px);
+                double w2 = (x0 - px) * (y1 - py) - (y0 - py) * (x1 - px);
+                if (area > 0.0) {
+                    if (w0 < -1e-9 || w1 < -1e-9 || w2 < -1e-9) continue;
+                } else {
+                    if (w0 > 1e-9 || w1 > 1e-9 || w2 > 1e-9) continue;
+                }
+                size_t index = (size_t)y * resolution + (size_t)x;
+                counts[index]++;
+                fragments++;
+                if (counts[index] > max_count) max_count = counts[index];
+            }
+        }
+    }
+
+    size_t visible = 0;
+    for (size_t i = 0; i < pixels; i++) if (counts[i]) visible++;
+    if (visible) stats.avg_overdraw = (float)((double)fragments / (double)visible);
+    if (max_count) stats.max_overdraw = (float)max_count;
+    stats.total_shaded_pixels = fragments > UINT32_MAX ? UINT32_MAX : (uint32_t)fragments;
+    stats.visible_pixels = visible > UINT32_MAX ? UINT32_MAX : (uint32_t)visible;
+    free(counts);
+    free(screen);
     return stats;
+}
+
+typedef struct overdraw_depth_entry {
+    uint32_t triangle;
+    float depth;
+} overdraw_depth_entry;
+
+static int compare_overdraw_depth(const void *left, const void *right) {
+    const overdraw_depth_entry *a = left, *b = right;
+    return (a->depth > b->depth) - (a->depth < b->depth);
 }
 
 int geomlib_optimize_overdraw(
     geomlib_trimesh *mesh,
     geomlib_vec3 view_position
 ) {
-    if (!mesh) {
+    if (!mesh || !mesh->vertices || !mesh->indices || !mesh->triangle_count)
         return GEOMLIB_MESH_ERROR_INVALID;
-    }
 
-    /* Compute triangle centers and depths */
-    geomlib_vec3 *centers = (geomlib_vec3*)malloc(mesh->triangle_count * sizeof(geomlib_vec3));
-    float *depths = (float*)malloc(mesh->triangle_count * sizeof(float));
-
+    overdraw_depth_entry *entries = malloc(mesh->triangle_count * sizeof(*entries));
+    if (!entries) return GEOMLIB_MESH_ERROR_MEMORY;
     for (size_t i = 0; i < mesh->triangle_count; i++) {
         geomlib_vec3 v0 = mesh->vertices[mesh->indices[i * 3 + 0]];
         geomlib_vec3 v1 = mesh->vertices[mesh->indices[i * 3 + 1]];
         geomlib_vec3 v2 = mesh->vertices[mesh->indices[i * 3 + 2]];
-
-        centers[i] = geomlib_vec3_create(
-            (v0.x + v1.x + v2.x) / 3.0f,
-            (v0.y + v1.y + v2.y) / 3.0f,
-            (v0.z + v1.z + v2.z) / 3.0f
-        );
-
-        geomlib_vec3 to_view = geomlib_vec3_sub(view_position, centers[i]);
-        depths[i] = geomlib_vec3_length(to_view);
+        geomlib_vec3 center = geomlib_vec3_mul(
+            geomlib_vec3_add(geomlib_vec3_add(v0, v1), v2), 1.0f / 3.0f);
+        entries[i].triangle = (uint32_t)i;
+        entries[i].depth = geomlib_vec3_length(geomlib_vec3_sub(view_position, center));
     }
+    qsort(entries, mesh->triangle_count, sizeof(*entries), compare_overdraw_depth);
 
-    /* Sort triangles front-to-back */
-    uint32_t *sorted_indices = (uint32_t*)malloc(mesh->triangle_count * sizeof(uint32_t));
+    uint32_t *new_indices = malloc(mesh->triangle_count * 3 * sizeof(*new_indices));
+    if (!new_indices) {
+        free(entries);
+        return GEOMLIB_MESH_ERROR_MEMORY;
+    }
     for (size_t i = 0; i < mesh->triangle_count; i++) {
-        sorted_indices[i] = (uint32_t)i;
+        uint32_t source = entries[i].triangle;
+        for (int j = 0; j < 3; j++)
+            new_indices[i * 3 + j] = mesh->indices[source * 3 + j];
     }
-
-    /* Simple bubble sort (could use qsort for larger meshes) */
-    for (size_t i = 0; i < mesh->triangle_count - 1; i++) {
-        for (size_t j = 0; j < mesh->triangle_count - i - 1; j++) {
-            if (depths[sorted_indices[j]] > depths[sorted_indices[j + 1]]) {
-                uint32_t temp = sorted_indices[j];
-                sorted_indices[j] = sorted_indices[j + 1];
-                sorted_indices[j + 1] = temp;
-            }
-        }
-    }
-
-    /* Reorder indices */
-    uint32_t *new_indices = (uint32_t*)malloc(mesh->triangle_count * 3 * sizeof(uint32_t));
-    for (size_t i = 0; i < mesh->triangle_count; i++) {
-        uint32_t src_tri = sorted_indices[i];
-        new_indices[i * 3 + 0] = mesh->indices[src_tri * 3 + 0];
-        new_indices[i * 3 + 1] = mesh->indices[src_tri * 3 + 1];
-        new_indices[i * 3 + 2] = mesh->indices[src_tri * 3 + 2];
-    }
-
     free(mesh->indices);
     mesh->indices = new_indices;
-
-    /* Cleanup */
-    free(centers);
-    free(depths);
-    free(sorted_indices);
-
+    free(entries);
     return GEOMLIB_MESH_SUCCESS;
 }
 
@@ -851,7 +927,6 @@ static geomlib_tristrip extract_strip(
     strip.indices[strip.index_count++] = mesh->indices[start_tri * 3 + 2];
 
     uint32_t current_tri = start_tri;
-    uint32_t edge = 0;  /* Try edge 0 first */
 
     /* Extend strip as far as possible */
     while (true) {
@@ -961,29 +1036,24 @@ static size_t encode_varint(uint32_t value, uint8_t *buffer) {
 }
 
 /* Decode variable-length encoded int */
-static size_t decode_varint(const uint8_t *buffer, uint32_t *value) {
+static size_t decode_varint(const uint8_t *buffer, size_t length, uint32_t *value) {
     *value = 0;
-    size_t shift = 0;
-    size_t bytes = 0;
-
-    while (true) {
-        uint8_t byte = buffer[bytes++];
-        *value |= ((uint32_t)(byte & 0x7F)) << shift;
-        if ((byte & 0x80) == 0) break;
-        shift += 7;
-        if (shift >= 32) break;  /* Prevent overflow */
+    for (size_t byte_index = 0; byte_index < length && byte_index < 5; byte_index++) {
+        uint32_t byte = buffer[byte_index];
+        if (byte_index == 4 && byte > 15) return 0;
+        *value |= (byte & 0x7f) << (7 * byte_index);
+        if (byte < 128) return byte_index + 1;
     }
-
-    return bytes;
+    return 0;
 }
 
-/* Zig-zag encoding for signed deltas */
-static uint32_t zigzag_encode(int32_t value) {
-    return (uint32_t)((value << 1) ^ (value >> 31));
+/* The delta is a signed 32-bit value represented modulo 2^32. */
+static uint32_t zigzag_encode(uint32_t delta) {
+    return (delta << 1) ^ (0u - (delta >> 31));
 }
 
-static int32_t zigzag_decode(uint32_t value) {
-    return (int32_t)((value >> 1) ^ (-(int32_t)(value & 1)));
+static uint32_t zigzag_decode(uint32_t value) {
+    return (value >> 1) ^ (0u - (value & 1u));
 }
 
 geomlib_compressed_indices geomlib_compress_indices(
@@ -991,27 +1061,25 @@ geomlib_compressed_indices geomlib_compress_indices(
     size_t index_count,
     uint32_t vertex_count
 ) {
-    geomlib_compressed_indices compressed;
+    geomlib_compressed_indices compressed = {0};
     compressed.original_count = index_count;
     compressed.vertex_count = vertex_count;
 
-    if (!indices || index_count == 0) {
-        compressed.data = NULL;
-        compressed.compressed_size = 0;
+    if (!indices || index_count == 0 || index_count > SIZE_MAX / 5) {
         return compressed;
     }
 
-    /* Worst case: 5 bytes per index + header */
-    size_t max_size = index_count * 5 + 16;
+    /* Worst case: five bytes per index. */
+    size_t max_size = index_count * 5;
     compressed.data = (uint8_t*)malloc(max_size);
-    compressed.compressed_size = 0;
+    if (!compressed.data) return compressed;
 
     /* Encode using delta encoding */
     uint32_t last_index = 0;
 
     for (size_t i = 0; i < index_count; i++) {
         /* Compute delta */
-        int32_t delta = (int32_t)(indices[i] - last_index);
+        uint32_t delta = indices[i] - last_index;
 
         /* Zig-zag encode delta (converts signed to unsigned) */
         uint32_t encoded = zigzag_encode(delta);
@@ -1026,7 +1094,8 @@ geomlib_compressed_indices geomlib_compress_indices(
     }
 
     /* Shrink to actual size */
-    compressed.data = (uint8_t*)realloc(compressed.data, compressed.compressed_size);
+    uint8_t *smaller = (uint8_t*)realloc(compressed.data, compressed.compressed_size);
+    if (smaller) compressed.data = smaller;
 
     return compressed;
 }
@@ -1049,13 +1118,15 @@ int geomlib_decompress_indices(
 
         /* Decode variable-length int */
         uint32_t encoded;
-        offset += decode_varint(compressed->data + offset, &encoded);
+        size_t bytes = decode_varint(compressed->data + offset,
+                                     compressed->compressed_size - offset, &encoded);
+        if (!bytes) return GEOMLIB_MESH_ERROR_INVALID;
+        offset += bytes;
 
-        /* Zig-zag decode */
-        int32_t delta = zigzag_decode(encoded);
+        uint32_t delta = zigzag_decode(encoded);
 
         /* Reconstruct index */
-        indices[i] = last_index + (uint32_t)delta;
+        indices[i] = last_index + delta;
         last_index = indices[i];
     }
 

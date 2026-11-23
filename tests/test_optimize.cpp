@@ -93,6 +93,20 @@ static int test_index_compression() {
 
     geomlib_compressed_indices_free(&compressed);
 
+    const uint32_t wide[] = {0, UINT32_MAX, 0x80000000u, 0, 400};
+    compressed = geomlib_compress_indices(wide, 5, UINT32_MAX);
+    TEST_ASSERT(geomlib_decompress_indices(&compressed, decompressed) == GEOMLIB_MESH_SUCCESS,
+                "Full-width deltas should round-trip");
+    for (size_t i = 0; i < 5; i++)
+        TEST_ASSERT(decompressed[i] == wide[i], "Full-width delta must retain its bits");
+    for (size_t size = 0; size < compressed.compressed_size; size++) {
+        auto truncated = compressed;
+        truncated.compressed_size = size;
+        TEST_ASSERT(geomlib_decompress_indices(&truncated, decompressed) == GEOMLIB_MESH_ERROR_INVALID,
+                    "Truncated streams must fail");
+    }
+    geomlib_compressed_indices_free(&compressed);
+
     printf("  PASS\n");
     return 0;
 }
@@ -103,7 +117,6 @@ static int test_compression_sphere() {
 
     /* Create a sphere */
     geomlib_trimesh mesh;
-    geomlib_trimesh_init(&mesh, 0, 0);
     geomlib_create_sphere(&mesh, 1.0f, 16, 16);
 
     printf("  Sphere: %zu vertices, %zu triangles\n",
@@ -147,7 +160,6 @@ static int test_strips_sphere() {
 
     /* Create a sphere */
     geomlib_trimesh mesh;
-    geomlib_trimesh_init(&mesh, 0, 0);
     geomlib_create_sphere(&mesh, 1.0f, 8, 8);
 
     printf("  Sphere: %zu triangles\n", mesh.triangle_count);
@@ -185,6 +197,38 @@ static int test_strips_sphere() {
     return 0;
 }
 
+static int test_reorder_vertices() {
+    geomlib_trimesh mesh;
+    geomlib_trimesh_init(&mesh, 12, 2);
+    for (int i = 0; i < 6; i++) {
+        geomlib_vec3 normal = {float(i + 1), 0, 0};
+        geomlib_vec2 uv = {float(i + 2), 0};
+        geomlib_trimesh_add_vertex(&mesh, {float(i), 0, 0}, &normal, &uv);
+    }
+    geomlib_trimesh_add_triangle(&mesh, 2, 3, 4);
+    geomlib_trimesh_add_triangle(&mesh, 4, 1, 2);
+    const uint32_t bad[] = {1, 1}, order[] = {1, 0};
+    TEST_ASSERT(geomlib_reorder_vertices(&mesh, bad) == GEOMLIB_MESH_ERROR_INVALID &&
+                mesh.vertices[0].x == 0 && mesh.indices[0] == 2,
+                "Invalid triangle permutation should leave the mesh unchanged");
+    TEST_ASSERT(geomlib_reorder_vertices(&mesh, order) == GEOMLIB_MESH_SUCCESS,
+                "Reorder vertices by the requested traversal");
+    const int expected[] = {4, 1, 2, 3, 0, 5};
+    for (int i = 0; i < 6; i++) {
+        TEST_ASSERT(mesh.vertices[i].x == expected[i] && mesh.normals[i].x == expected[i] + 1 &&
+                    mesh.texcoords[i].x == expected[i] + 2, "Vertex attributes remain aligned");
+    }
+    const uint32_t corners[] = {2, 3, 4, 4, 1, 2};
+    for (size_t i = 0; i < 6; i++)
+        TEST_ASSERT(mesh.vertices[mesh.indices[i]].x == corners[i], "Original triangle order and geometry remain intact");
+    TEST_ASSERT(geomlib_optimize_vertex_fetch(&mesh) == GEOMLIB_MESH_SUCCESS,
+                "Default vertex fetch uses the same implementation");
+    TEST_ASSERT(geomlib_trimesh_add_vertex(&mesh, {}, nullptr, nullptr) == GEOMLIB_MESH_SUCCESS,
+                "Reserved vertex storage remains usable after reordering");
+    geomlib_trimesh_free(&mesh);
+    return 0;
+}
+
 int main() {
     printf("=== Mesh Optimization Tests ===\n\n");
 
@@ -192,6 +236,7 @@ int main() {
 
     failures += test_triangle_strips();
     failures += test_index_compression();
+    failures += test_reorder_vertices();
     failures += test_compression_sphere();
     failures += test_strips_sphere();
 

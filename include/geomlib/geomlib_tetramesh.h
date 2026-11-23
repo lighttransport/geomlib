@@ -113,13 +113,13 @@ void geomlib_tetramesh_init(
 /* Free tetrahedral mesh */
 void geomlib_tetramesh_free(geomlib_tetramesh *mesh);
 
-/* Add vertex */
+/* Add a vertex, returning its index or UINT32_MAX on allocation failure. */
 uint32_t geomlib_tetramesh_add_vertex(
     geomlib_tetramesh *mesh,
     geomlib_vec3 position
 );
 
-/* Add tetrahedron */
+/* Add a cell, returning its index or UINT32_MAX on allocation failure. */
 uint32_t geomlib_tetramesh_add_tetrahedron(
     geomlib_tetramesh *mesh,
     uint32_t v0, uint32_t v1, uint32_t v2, uint32_t v3
@@ -132,14 +132,20 @@ geomlib_tetra_params geomlib_tetra_params_default(geomlib_tetra_method method);
  * Tetrahedralization Algorithms
  * ============================================================================ */
 
-/* Generate tetrahedral mesh from surface mesh */
+/* Fill a closed, consistently wound surface. A tetrahedral fan is used when
+ * the volume centroid sees every face. Otherwise, a Delaunay candidate must
+ * reproduce the boundary surface. Missing facets are recovered by inserting
+ * Steiner points, so the boundary may be a subdivision of the input triangles;
+ * the surface itself is preserved. Octree, boundary subdivision, and hard
+ * maximum edge length are unsupported here. */
 int geomlib_tetrahedralize_surface(
     const geomlib_trimesh *surface,
     const geomlib_tetra_params *params,
     geomlib_tetramesh *tetramesh
 );
 
-/* Delaunay tetrahedralization of point cloud */
+/* Delaunay tetrahedralization of a point cloud. The initialized output is
+ * replaced on success. Coincident points retain their input vertex indices. */
 int geomlib_tetrahedralize_points(
     const geomlib_vec3 *points,
     size_t point_count,
@@ -154,7 +160,11 @@ int geomlib_tetrahedralize_box(
     geomlib_tetramesh *tetramesh
 );
 
-/* Constrained Delaunay with boundary preservation */
+/* Preserve the boundary surface. A supplied interior point can serve as the fan
+ * seed. The other interior points subdivide existing cells or are included in the
+ * Delaunay candidate when the fan is unavailable. Missing constrained facets are
+ * recovered by inserting Steiner points, so the boundary may be a subdivision of
+ * the input triangles. The initialized output is replaced only on success. */
 int geomlib_tetrahedralize_constrained(
     const geomlib_trimesh *boundary,
     const geomlib_vec3 *interior_points,
@@ -186,7 +196,8 @@ float geomlib_tetrahedron_volume(
     geomlib_vec3 v3
 );
 
-/* Compute dihedral angle between two faces */
+/* Interior dihedral angle in degrees for edges 01, 02, 03, 12, 13, 23.
+ * Returns NAN when the edge or adjacent face is degenerate. */
 float geomlib_tetrahedron_dihedral_angle(
     geomlib_vec3 v0,
     geomlib_vec3 v1,
@@ -218,18 +229,32 @@ void geomlib_tetrahedron_circumsphere(
  * Mesh Optimization
  * ============================================================================ */
 
-/* Optimize mesh quality through vertex smoothing */
+/* Attempt up to iterations local interior flips (2-to-3 face flips and 3-to-2
+ * edge flips) to improve worst-cell shape. Boundary triangles stay fixed. */
 int geomlib_tetramesh_optimize(
     geomlib_tetramesh *mesh,
     int iterations
 );
 
-/* Remove sliver elements */
+/* Remove slivers where a valid interior-face flip reduces the local sliver count.
+ * A successful pass can retain slivers that require other operations. */
 int geomlib_tetramesh_remove_slivers(
     geomlib_tetramesh *mesh
 );
 
-/* Refine mesh by inserting Steiner points */
+/* Laplacian smoothing of interior vertices. Boundary vertices and boundary
+ * triangles stay fixed. A move is accepted only when every incident cell keeps
+ * positive volume and local worst-cell quality improves. */
+int geomlib_tetramesh_smooth(
+    geomlib_tetramesh *mesh,
+    int iterations
+);
+
+/* Bisect the longest eligible edge across all incident cells. The target is
+ * max_edge_length, or element_size when max_edge_length is zero. The chosen
+ * edge must exceed twice min_edge_length. Both budgets limit edge bisections.
+ * Boundary edges are locked unless refine_boundary is true and preserve_boundary
+ * is false. A successful pass returns the mesh reached within those constraints. */
 int geomlib_tetramesh_refine(
     geomlib_tetramesh *mesh,
     const geomlib_tetra_params *params
@@ -239,13 +264,13 @@ int geomlib_tetramesh_refine(
  * Boundary Operations
  * ============================================================================ */
 
-/* Extract boundary surface from tetrahedral mesh */
+/* Append outward boundary triangles and the source vertices to an initialized mesh. */
 int geomlib_tetramesh_extract_boundary(
     const geomlib_tetramesh *tetramesh,
     geomlib_trimesh *boundary
 );
 
-/* Mark boundary vertices */
+/* Refresh outward boundary faces and boundary vertex flags on success. */
 void geomlib_tetramesh_mark_boundary(
     geomlib_tetramesh *mesh
 );
@@ -254,7 +279,7 @@ void geomlib_tetramesh_mark_boundary(
  * Export Functions
  * ============================================================================ */
 
-/* Export to common CFD formats */
+/* Export an ASCII VTK legacy unstructured grid or an ASCII Gmsh 2.2 mesh. */
 int geomlib_tetramesh_export_vtk(
     const geomlib_tetramesh *mesh,
     const char *filename

@@ -14,6 +14,18 @@ emmake make
 # This will generate geomlib.js and geomlib.wasm in demo/public/
 ```
 
+The module is built with `-sENVIRONMENT=web,node`, so the same artifact can be
+exercised headlessly:
+
+```bash
+node smoke.mjs
+```
+
+The smoke test checks a plane's boundary loop, SDF generation and a closed
+surface rebuilding a welded box, heat-method geodesics, Taubin smoothing,
+Butterfly and Loop subdivision, point-cloud reconstruction, and box
+tetrahedralization.
+
 ## Running the Demo
 
 ```bash
@@ -38,8 +50,8 @@ bun run dev    # Start development server
 - **Load File (PLY/SPZ)**: Load point clouds from files
   - **PLY Format**: ASCII, binary, and compressed PLY files
   - **SPZ/Splat Format**: Gaussian splat files (compressed or uncompressed)
-- **Reconstruct (Greedy)**: Fast greedy projection triangulation
-- **Reconstruct (Marching)**: Voxel-based marching cubes reconstruction
+- **Reconstruct (Greedy)**: Tangent-plane one-ring fan triangulation with normal checks
+- **Reconstruct (Marching)**: Oriented-point implicit field extracted with marching cubes
 - **Reconstruct (Auto)**: Automatic algorithm selection based on point count
 
 ### Collision Proxy Generation
@@ -52,9 +64,12 @@ bun run dev    # Start development server
 - **Simplify 50%**: Reduce mesh complexity by 50% using quadric error metrics
 - **Build BVH**: Construct Bounding Volume Hierarchy for ray tracing
 - **Cast Random Rays**: Visualize ray tracing with random rays (green = hit, red = miss)
+- **Rebuild from SDF**: Extract the zero level set from a generated distance field
 
 ### Visualization Options
 - **Wireframe**: Toggle wireframe overlay on meshes
+- **Color Components**: Color each connected component of the source mesh
+- **Show Boundary Loops**: Draw closed mesh boundaries in gold
 - **Show Proxy**: Display collision proxy mesh (orange)
 - **Show BVH**: Visualize BVH structure with colored bounding boxes
   - **BVH Depth Slider**: Control how many levels of the BVH tree to display
@@ -62,7 +77,7 @@ bun run dev    # Start development server
   - Leaf nodes are more opaque than interior nodes
 
 ### Statistics
-- Real-time mesh statistics (vertices, triangles, surface area, volume)
+- Mesh statistics include vertex, triangle, and edge counts, surface area, median edge length, and minimum angle. Closed meshes also show volume.
 - BVH statistics (max depth, leaf count, average leaf size)
 
 ## BVH Visualization
@@ -139,7 +154,8 @@ web/
 ## API Usage
 
 ```javascript
-import createGeomlibModule from './public/geomlib.js';
+// The web server serves demo/public/ at its root.
+import createGeomlibModule from '/geomlib.js';
 
 const geomlib = await createGeomlibModule();
 
@@ -147,9 +163,9 @@ const geomlib = await createGeomlibModule();
 const mesh = geomlib.createSphere(1.0, 32, 16);
 
 // Get mesh data for Three.js
-const vertices = mesh.getVertices();  // Float32Array
-const indices = mesh.getIndices();    // Uint32Array
-const normals = mesh.getNormals();    // Float32Array
+const vertices = mesh.getVertices();  // JavaScript array
+const indices = mesh.getIndices();    // JavaScript array
+const normals = mesh.getNormals();    // JavaScript array
 
 // Generate collision proxy
 const proxy = geomlib.generateCollisionProxy(mesh, 0, 0); // Convex hull
@@ -173,3 +189,31 @@ if (hit.hit) {
   console.log('Hit at:', hit.x, hit.y, hit.z);
 }
 ```
+
+Generate a signed distance field from a closed mesh and extract a new mesh at
+the desired iso-value. Keep the source mesh and its BVH alive while making
+queries against that BVH.
+
+```javascript
+const sdf = geomlib.generateSDFResolution(mesh, 24);
+if (sdf) {
+  try {
+    const rebuilt = sdf.extractSurface(0);
+    if (rebuilt) {
+      try {
+        console.log(rebuilt.getTriangleCount());
+      } finally {
+        rebuilt.delete();
+      }
+    }
+  } finally {
+    sdf.delete();
+  }
+}
+bvh.delete();
+proxy.delete();
+mesh.delete();
+```
+
+Call `.delete()` on owned Embind objects when finished. Topology and statistics
+results are plain JavaScript objects and arrays.

@@ -20,9 +20,12 @@ extern "C" {
  * SDF Data Structures
  * ============================================================================ */
 
+/* Opaque sparse narrow-band storage. NULL for dense grids. */
+struct geomlib_sdf_band;
+
 /* Signed distance field */
 typedef struct geomlib_sdf {
-    float *values;                  /* Distance values (linearized 3D array) */
+    float *values;                  /* Distance values (linearized 3D array), NULL when sparse */
 
     geomlib_vec3 origin;            /* Grid origin (min corner) */
     geomlib_vec3 extent;            /* Grid extent (size) */
@@ -34,8 +37,19 @@ typedef struct geomlib_sdf {
     bool is_narrow_band;            /* Is this a narrow-band SDF? */
     float narrow_band_width;        /* Band width in voxels (0 = full SDF) */
 
+    bool is_sparse;                 /* True when only defined samples are stored */
+    size_t stored_voxels;           /* Number of defined samples */
+
     geomlib_aabb bounds;            /* Bounding box */
+
+    struct geomlib_sdf_band *band;  /* Sparse storage when is_sparse */
 } geomlib_sdf;
+
+/* Distance evaluation strategy */
+typedef enum geomlib_sdf_algorithm {
+    GEOMLIB_SDF_ALGORITHM_BRUTE_FORCE = 0,   /* Exact per-voxel distance (default) */
+    GEOMLIB_SDF_ALGORITHM_FAST_SWEEPING = 1  /* Exact band seed, then eikonal sweeping */
+} geomlib_sdf_algorithm;
 
 /* SDF generation parameters */
 typedef struct geomlib_sdf_params {
@@ -49,6 +63,9 @@ typedef struct geomlib_sdf_params {
     bool use_bvh;                   /* Use BVH for acceleration (recommended) */
 
     float padding;                  /* Extra padding around mesh (in voxels) */
+
+    bool sparse;                    /* Store only the band; requires narrow_band */
+    geomlib_sdf_algorithm algorithm; /* Distance evaluation strategy */
 } geomlib_sdf_params;
 
 /* ============================================================================
@@ -79,6 +96,22 @@ geomlib_sdf geomlib_mesh_to_sdf_resolution(
 /* Free SDF data */
 void geomlib_sdf_free(geomlib_sdf *sdf);
 
+/* True when the sample at (x, y, z) has a stored value. Out-of-range is false. */
+bool geomlib_sdf_is_defined(
+    const geomlib_sdf *sdf,
+    uint32_t x,
+    uint32_t y,
+    uint32_t z
+);
+
+/* Number of stored samples. Equals total_voxels for dense grids. */
+size_t geomlib_sdf_stored_voxels(const geomlib_sdf *sdf);
+
+/* Convert a sparse band into a dense grid. Undefined samples are clamped to the
+ * band limit with the sign of the nearest defined neighbour. Returns
+ * GEOMLIB_MESH_SUCCESS on an already-dense grid. Ownership stays with the caller. */
+int geomlib_sdf_make_dense(geomlib_sdf *sdf);
+
 /* ============================================================================
  * SDF Queries
  * ============================================================================ */
@@ -100,7 +133,7 @@ bool geomlib_sdf_world_to_voxel(
     int32_t *z
 );
 
-/* Query distance at world position (trilinear interpolation) */
+/* Query by trilinear interpolation between voxel centers. Returns FLT_MAX outside that domain. */
 float geomlib_sdf_query_distance(
     const geomlib_sdf *sdf,
     geomlib_vec3 point
@@ -114,7 +147,7 @@ float geomlib_sdf_query_distance_voxel(
     uint32_t z
 );
 
-/* Query gradient at world position (central differences) */
+/* Query gradient using central differences, with one-sided differences at the boundary. */
 geomlib_vec3 geomlib_sdf_query_gradient(
     const geomlib_sdf *sdf,
     geomlib_vec3 point
@@ -136,7 +169,7 @@ bool geomlib_sdf_is_inside(
  * SDF to Mesh Conversion (Marching Cubes)
  * ============================================================================ */
 
-/* Extract isosurface using Marching Cubes */
+/* Extract an indexed isosurface from voxel-center samples. On success output owns a new mesh. */
 int geomlib_sdf_to_mesh(
     const geomlib_sdf *sdf,
     float iso_value,
@@ -146,6 +179,19 @@ int geomlib_sdf_to_mesh(
 /* Extract zero-level set (iso_value = 0) */
 int geomlib_sdf_extract_surface(
     const geomlib_sdf *sdf,
+    geomlib_trimesh *output
+);
+
+/* Extract the zero-level set and place vertices on reference sharp edges.
+ * Vertices within 1.5 voxels of a reference feature segment snap onto it, which
+ * preserves creases. When snap_to_surface is true other vertices project onto the
+ * closest reference surface point. reference and its features may be NULL, in
+ * which case this matches geomlib_sdf_extract_surface. */
+int geomlib_sdf_extract_surface_features(
+    const geomlib_sdf *sdf,
+    const geomlib_trimesh *reference,
+    float sharp_angle_deg,
+    bool snap_to_surface,
     geomlib_trimesh *output
 );
 
@@ -246,20 +292,23 @@ typedef struct geomlib_sdf_stats {
 
 geomlib_sdf_stats geomlib_compute_sdf_stats(const geomlib_sdf *sdf);
 
-/* Resize SDF to new resolution */
+/* Resample the longest axis to new_resolution, preserving origin and uniform spacing.
+ * Dense input only; materialize sparse grids with geomlib_sdf_make_dense first.
+ * The returned grid owns new storage. An empty result indicates failure. */
 geomlib_sdf geomlib_sdf_resize(
     const geomlib_sdf *sdf,
     uint32_t new_resolution
 );
 
-/* Copy SDF region */
+/* Copy samples whose centers lie inside region, preserving voxel spacing.
+ * The returned grid owns new storage. An empty result indicates no samples or failure. */
 geomlib_sdf geomlib_sdf_extract_region(
     const geomlib_sdf *sdf,
     geomlib_aabb region
 );
 
 /* ============================================================================
- * File I/O (Future)
+ * File I/O
  * ============================================================================ */
 
 /* Save SDF to file (binary format) */
@@ -268,7 +317,7 @@ int geomlib_sdf_save(
     const char *filename
 );
 
-/* Load SDF from file */
+/* Load an SDF1 grid into an empty output. The output is assigned only on success. */
 int geomlib_sdf_load(
     geomlib_sdf *sdf,
     const char *filename

@@ -75,16 +75,7 @@ static geomlib_vec3 compute_triangle_normal(
 }
 
 /* Helper: Triangle area */
-static float compute_triangle_area(
-    geomlib_vec3 v0,
-    geomlib_vec3 v1,
-    geomlib_vec3 v2
-) {
-    geomlib_vec3 e1 = geomlib_vec3_sub(v1, v0);
-    geomlib_vec3 e2 = geomlib_vec3_sub(v2, v0);
-    geomlib_vec3 cross = geomlib_vec3_cross(e1, e2);
-    return geomlib_vec3_length(cross) * 0.5f;
-}
+
 
 /* Segment mesh by normal clustering */
 static int segment_by_normals(
@@ -423,9 +414,63 @@ void geomlib_atlas_compute_stats(
     }
     atlas->coverage = used_area * 100.0f;
 
-    /* Compute stretch (simplified) */
-    atlas->avg_stretch = 1.0f;
-    atlas->max_stretch = 1.0f;
+    /* Compute stretch: normalized UV-to-3D edge-length ratios. */
+    double total_3d_area = 0.0, total_uv_area = 0.0;
+    for (size_t c = 0; c < atlas->chart_count; c++) {
+        const geomlib_atlas_chart *chart = &atlas->charts[c];
+        for (size_t t = 0; t < chart->triangle_count; t++) {
+            size_t triangle = chart->triangles[t];
+            if (triangle >= mesh->triangle_count) continue;
+            uint32_t i0 = mesh->indices[triangle * 3], i1 = mesh->indices[triangle * 3 + 1],
+                     i2 = mesh->indices[triangle * 3 + 2];
+            geomlib_vec3 p0 = mesh->vertices[i0], p1 = mesh->vertices[i1],
+                          p2 = mesh->vertices[i2];
+            total_3d_area += 0.5 * geomlib_vec3_length(geomlib_vec3_cross(
+                geomlib_vec3_sub(p1, p0), geomlib_vec3_sub(p2, p0)));
+            if (!mesh->texcoords) continue;
+            geomlib_vec2 uv0 = mesh->texcoords[i0], uv1 = mesh->texcoords[i1],
+                          uv2 = mesh->texcoords[i2];
+            total_uv_area += 0.5 * fabs((uv1.x - uv0.x) * (uv2.y - uv0.y) -
+                                        (uv1.y - uv0.y) * (uv2.x - uv0.x));
+        }
+    }
+    double scale = 1.0;
+    if (total_3d_area > 0.0 && total_uv_area > 0.0)
+        scale = sqrt(total_uv_area / total_3d_area);
+    double stretch_sum = 0.0;
+    float max_stretch = 0.0f;
+    size_t stretch_samples = 0;
+    if (mesh->texcoords) {
+        for (size_t c = 0; c < atlas->chart_count; c++) {
+            const geomlib_atlas_chart *chart = &atlas->charts[c];
+            for (size_t t = 0; t < chart->triangle_count; t++) {
+                size_t triangle = chart->triangles[t];
+                if (triangle >= mesh->triangle_count) continue;
+                uint32_t index[3] = {mesh->indices[triangle * 3],
+                                     mesh->indices[triangle * 3 + 1],
+                                     mesh->indices[triangle * 3 + 2]};
+                for (int j = 0; j < 3; j++) {
+                    uint32_t a = index[j], b = index[(j + 1) % 3];
+                    double length3d = geomlib_vec3_length(
+                        geomlib_vec3_sub(mesh->vertices[b], mesh->vertices[a]));
+                    double length_uv = hypot((double)mesh->texcoords[b].x - mesh->texcoords[a].x,
+                                             (double)mesh->texcoords[b].y - mesh->texcoords[a].y);
+                    if (!(length3d > 1e-12) || !(scale > 1e-12)) continue;
+                    double ratio = length_uv / (length3d * scale);
+                    stretch_sum += ratio;
+                    if (ratio > max_stretch) max_stretch = (float)ratio;
+                    stretch_samples++;
+                }
+            }
+        }
+    }
+    if (stretch_samples) {
+        atlas->avg_stretch = (float)(stretch_sum / (double)stretch_samples);
+        atlas->max_stretch = max_stretch;
+    } else {
+        atlas->avg_stretch = 1.0f;
+        atlas->max_stretch = 1.0f;
+    }
 }
 
 /* Get chart for triangle */

@@ -49,6 +49,7 @@
         <button id="btn-simplify">Simplify 50%</button>
         <button id="btn-bvh">Build BVH</button>
         <button id="btn-ray">Cast Random Rays</button>
+        <button id="btn-extract-sdf">Rebuild from SDF</button>
       </div>
 
       <div class="section">
@@ -91,6 +92,14 @@
           <input type="checkbox" id="chk-points">
           Show Points
         </label>
+        <label>
+          <input type="checkbox" id="chk-components">
+          Color Components
+        </label>
+        <label>
+          <input type="checkbox" id="chk-boundaries">
+          Show Boundary Loops
+        </label>
         <div id="bvh-depth-control" style="display: none; margin-top: 10px;">
           <label style="display: block; margin-bottom: 5px;">
             BVH Depth: <span id="bvh-depth-value">3</span>
@@ -102,6 +111,7 @@
       <div id="stats" class="section">
         <h3>Statistics</h3>
         <div id="mesh-stats"></div>
+        <div id="sdf-status" role="status"></div>
         <div id="pointcloud-stats"></div>
         <div id="bvh-stats"></div>
         <div id="healing-stats"></div>

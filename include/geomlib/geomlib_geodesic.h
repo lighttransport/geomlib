@@ -29,11 +29,10 @@ geomlib_geodesic_distances geomlib_geodesic_create(size_t vertex_count);
 /* Free geodesic distance structure */
 void geomlib_geodesic_free(geomlib_geodesic_distances *geodesic);
 
-/* Compute geodesic distances using heat method
- * source_vertices: array of vertex indices to use as sources
- * source_count: number of source vertices
- * time_step: heat flow time step (if 0, automatically computed as mean_edge_length^2)
- */
+/* Heat-method geodesic distances (Crane et al. 2012): solves the heat equation,
+ * normalizes its gradient, and solves a Poisson equation. A time_step <= 0 selects
+ * mean_edge_length^2. Falls back to edge-following Dijkstra only if the linear
+ * solves fail. */
 int geomlib_compute_geodesic_heat(
     const geomlib_trimesh *mesh,
     const uint32_t *source_vertices,

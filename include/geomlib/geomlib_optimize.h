@@ -121,7 +121,8 @@ typedef struct geomlib_overdraw_stats {
     uint32_t visible_pixels;        /* Visible pixels after depth test */
 } geomlib_overdraw_stats;
 
-/* Compute overdraw statistics from viewpoint */
+/* Compute overdraw stats by rasterizing the mesh orthographically toward its
+ * center. Back faces are culled; fragments are counted per pixel. */
 geomlib_overdraw_stats geomlib_analyze_overdraw(
     const geomlib_trimesh *mesh,
     geomlib_vec3 view_position,
@@ -143,10 +144,11 @@ int geomlib_optimize_vertex_fetch(
     geomlib_trimesh *mesh
 );
 
-/* Generate optimal vertex order based on index buffer */
+/* Reorder vertex storage by first use, preserving triangle order and attributes.
+ * Unreferenced vertices follow referenced vertices in their original order. */
 int geomlib_reorder_vertices(
     geomlib_trimesh *mesh,
-    const uint32_t *triangle_order  /* Optional: pre-optimized triangle order */
+    const uint32_t *triangle_order  /* Optional permutation used for the first-use scan */
 );
 
 /* ============================================================================

@@ -263,6 +263,7 @@ double geomlib_mc_estimate_surface_integral(
     size_t num_samples,
     float area
 ) {
+    (void)samples;
     if (num_samples == 0) {
         return 0.0;
     }

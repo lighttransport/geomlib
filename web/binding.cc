@@ -414,12 +414,9 @@ PointCloud* gaussiansSamplePoints(val positions_js, int samplesPerGaussian) {
 Mesh* reconstructSurface(const PointCloud& pc, int method, float voxelSize) {
     Mesh* mesh = new Mesh();
 
-    geomlib_surface_params params;
-    params.method = (geomlib_surface_method)method;
+    geomlib_surface_params params = geomlib_surface_params_default(
+        (geomlib_surface_method)method);
     params.voxel_size = voxelSize;
-    params.max_edge_length = 0.0f;  // Auto
-    params.max_neighbors = 20;
-    params.search_radius = 0.0f;  // Auto
 
     geomlib_reconstruct_surface(&pc.pc, &params, &mesh->mesh);
 
@@ -999,7 +996,8 @@ public:
 };
 
 VectorField* computeGradient(const Mesh& mesh, const ScalarField& field, int method) {
-    VectorField* gradient = new VectorField(mesh.mesh.vertex_count);
+    VectorField* gradient = new VectorField(0);
+    geomlib_vector_field_free(&gradient->field);
 
     int result = geomlib_compute_gradient_scalar(
         &mesh.mesh,
@@ -1124,8 +1122,8 @@ val computeCFDQuality(const TetraMesh& tetramesh) {
     val output = val::object();
     output.set("allValid", all_valid);
     output.set("failedCount", (unsigned int)failed_count);
-    output.set("passRate", (float)(tetramesh.mesh.tetrahedron_count - failed_count) /
-        (float)tetramesh.mesh.tetrahedron_count * 100.0f);
+    size_t cells = tetramesh.mesh.tetrahedron_count;
+    output.set("passRate", cells ? 100.0f * (cells - failed_count) / cells : 100.0f);
 
     return output;
 }
@@ -1233,6 +1231,22 @@ Mesh* subdivideLoop(const Mesh& input, int levels) {
 
     geomlib_subdivision_params params = geomlib_subdivision_params_default(
         GEOMLIB_SUBDIV_LOOP, levels);
+
+    int result = geomlib_subdivide_mesh(&input.mesh, &params, &output->mesh);
+
+    if (result != GEOMLIB_MESH_SUCCESS) {
+        delete output;
+        return nullptr;
+    }
+
+    return output;
+}
+
+Mesh* subdivideButterfly(const Mesh& input, int levels) {
+    Mesh* output = new Mesh();
+
+    geomlib_subdivision_params params = geomlib_subdivision_params_default(
+        GEOMLIB_SUBDIV_BUTTERFLY, levels);
 
     int result = geomlib_subdivide_mesh(&input.mesh, &params, &output->mesh);
 
@@ -1660,6 +1674,17 @@ public:
         return geomlib_sdf_is_inside(&sdf, point);
     }
 
+    Mesh* extractSurface(float isoValue) const {
+        geomlib_trimesh extracted = {};
+        if (geomlib_sdf_to_mesh(&sdf, isoValue, &extracted) != GEOMLIB_MESH_SUCCESS)
+            return nullptr;
+
+        Mesh* result = new Mesh();
+        geomlib_trimesh_free(&result->mesh);
+        result->mesh = extracted;
+        return result;
+    }
+
     val getStats() const {
         geomlib_sdf_stats stats = geomlib_compute_sdf_stats(&sdf);
         val output = val::object();
@@ -1681,18 +1706,24 @@ SDF* generateSDF(const Mesh* mesh, float voxelSize) {
 
     SDF* sdf = new SDF();
     sdf->sdf = geomlib_mesh_to_sdf_voxel_size(&mesh->mesh, voxelSize);
-
+    if (!sdf->sdf.values) {
+        delete sdf;
+        return nullptr;
+    }
     return sdf;
 }
 
 SDF* generateSDFResolution(const Mesh* mesh, int resolution) {
-    if (!mesh) {
+    if (!mesh || resolution <= 0) {
         return nullptr;
     }
 
     SDF* sdf = new SDF();
     sdf->sdf = geomlib_mesh_to_sdf_resolution(&mesh->mesh, resolution);
-
+    if (!sdf->sdf.values) {
+        delete sdf;
+        return nullptr;
+    }
     return sdf;
 }
 
@@ -1705,7 +1736,7 @@ val computeMeshStatistics(const Mesh* mesh, int histogramBins) {
         return val::object();
     }
 
-    geomlib_mesh_stats stats = geomlib_compute_mesh_stats(&mesh->mesh, histogramBins);
+    geomlib_mesh_stats stats = geomlib_compute_mesh_stats(&mesh->mesh, histogramBins > 0 ? histogramBins : 0);
 
     val output = val::object();
     output.set("vertexCount", (int)stats.vertex_count);
@@ -1939,6 +1970,7 @@ EMSCRIPTEN_BINDINGS(geomlib) {
         .function("getVoxelSize", &SDF::getVoxelSize)
         .function("queryDistance", &SDF::queryDistance)
         .function("isInside", &SDF::isInside)
+        .function("extractSurface", &SDF::extractSurface, return_value_policy::take_ownership())
         .function("getStats", &SDF::getStats)
         ;
 
@@ -1947,5 +1979,6 @@ EMSCRIPTEN_BINDINGS(geomlib) {
 
     // Subdivision
     function("subdivideLoop", &subdivideLoop, allow_raw_pointers());
+    function("subdivideButterfly", &subdivideButterfly, allow_raw_pointers());
     function("subdivideMidpoint", &subdivideMidpoint, allow_raw_pointers());
 }

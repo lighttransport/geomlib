@@ -67,7 +67,6 @@ float geomlib_compute_voronoi_area(
 ) {
     if (!mesh || vertex_idx >= mesh->vertex_count) return 0.0f;
 
-    geomlib_vec3 v = mesh->vertices[vertex_idx];
     float area = 0.0f;
 
     /* Sum contributions from all adjacent triangles */
@@ -329,6 +328,13 @@ int geomlib_compute_curvature(
         return result;
     }
 
+    uint32_t *neighbor_seen = calloc(mesh->vertex_count, sizeof(uint32_t));
+    if (!neighbor_seen) {
+        free(mean_curv);
+        free(gaussian_curv);
+        return GEOMLIB_MESH_ERROR_MEMORY;
+    }
+
     /* Compute derived values for each vertex */
     for (size_t v = 0; v < mesh->vertex_count; v++) {
         curvature->curvatures[v].mean = mean_curv[v];
@@ -372,57 +378,37 @@ int geomlib_compute_curvature(
             float tensor[2][2] = {{0.0f, 0.0f}, {0.0f, 0.0f}};
             float total_weight = 0.0f;
 
-            /* Accumulate from incident edges */
+            /* Accumulate height-based normal curvature along unique incident edges. */
             for (size_t t = 0; t < mesh->triangle_count; t++) {
-                uint32_t i0 = mesh->indices[t * 3 + 0];
-                uint32_t i1 = mesh->indices[t * 3 + 1];
-                uint32_t i2 = mesh->indices[t * 3 + 2];
-
-                /* Check if this triangle contains vertex v */
-                if (i0 != v && i1 != v && i2 != v) continue;
-
-                /* Get the other two vertices */
-                uint32_t v1, v2;
-                if (i0 == v) {
-                    v1 = i1;
-                    v2 = i2;
-                } else if (i1 == v) {
-                    v1 = i0;
-                    v2 = i2;
-                } else {
-                    v1 = i0;
-                    v2 = i1;
-                }
-
-                /* Edge vectors */
-                geomlib_vec3 e1 = geomlib_vec3_sub(mesh->vertices[v1], mesh->vertices[v]);
-                geomlib_vec3 e2 = geomlib_vec3_sub(mesh->vertices[v2], mesh->vertices[v]);
-
-                /* Project edges onto tangent plane */
-                geomlib_vec3 e1_proj = geomlib_vec3_sub(e1, geomlib_vec3_mul(normal, geomlib_vec3_dot(e1, normal)));
-                geomlib_vec3 e2_proj = geomlib_vec3_sub(e2, geomlib_vec3_mul(normal, geomlib_vec3_dot(e2, normal)));
-
-                /* Get coordinates in tangent frame */
-                float e1_t1 = geomlib_vec3_dot(e1_proj, tangent1);
-                float e1_t2 = geomlib_vec3_dot(e1_proj, tangent2);
-                float e2_t1 = geomlib_vec3_dot(e2_proj, tangent1);
-                float e2_t2 = geomlib_vec3_dot(e2_proj, tangent2);
-
-                /* Normal curvature in edge direction */
-                float len_e1 = geomlib_vec3_length(e1);
-                float len_e2 = geomlib_vec3_length(e2);
-
-                if (len_e1 > 1e-10f && len_e2 > 1e-10f) {
-                    /* Weight by edge length */
-                    float weight = len_e1 + len_e2;
-
-                    /* Accumulate to tensor (simplified) */
-                    tensor[0][0] += weight * e1_t1 * e1_t1;
-                    tensor[0][1] += weight * e1_t1 * e1_t2;
-                    tensor[1][0] += weight * e2_t1 * e2_t2;
-                    tensor[1][1] += weight * e2_t2 * e2_t2;
-
-                    total_weight += weight;
+                uint32_t i[3] = {mesh->indices[t * 3], mesh->indices[t * 3 + 1],
+                                 mesh->indices[t * 3 + 2]};
+                if (i[0] != v && i[1] != v && i[2] != v) continue;
+                for (int j = 0; j < 3; j++) {
+                    uint32_t neighbor = i[j];
+                    if (neighbor == v) continue;
+                    if (neighbor_seen[neighbor] == (uint32_t)v + 1) continue;
+                    neighbor_seen[neighbor] = (uint32_t)v + 1;
+                    geomlib_vec3 edge = geomlib_vec3_sub(mesh->vertices[neighbor],
+                                                         mesh->vertices[v]);
+                    double length2 = (double)edge.x * edge.x + (double)edge.y * edge.y +
+                                     (double)edge.z * edge.z;
+                    if (!(length2 > 1e-20)) continue;
+                    double height = geomlib_vec3_dot(edge, normal);
+                    double normal_curvature = 2.0 * height / length2;
+                    geomlib_vec3 projected = geomlib_vec3_sub(edge,
+                        geomlib_vec3_mul(normal, geomlib_vec3_dot(edge, normal)));
+                    double t1 = geomlib_vec3_dot(projected, tangent1);
+                    double t2 = geomlib_vec3_dot(projected, tangent2);
+                    double t_length = sqrt(t1 * t1 + t2 * t2);
+                    if (!(t_length > 1e-12)) continue;
+                    t1 /= t_length;
+                    t2 /= t_length;
+                    double weight = length2;
+                    tensor[0][0] += (float)(weight * normal_curvature * t1 * t1);
+                    tensor[0][1] += (float)(weight * normal_curvature * t1 * t2);
+                    tensor[1][0] += (float)(weight * normal_curvature * t2 * t1);
+                    tensor[1][1] += (float)(weight * normal_curvature * t2 * t2);
+                    total_weight += (float)weight;
                 }
             }
 
@@ -488,6 +474,7 @@ int geomlib_compute_curvature(
         }
     }
 
+    free(neighbor_seen);
     free(mean_curv);
     free(gaussian_curv);
 

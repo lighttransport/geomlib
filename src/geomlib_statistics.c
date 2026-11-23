@@ -55,6 +55,27 @@ float geomlib_compute_angle(
     return acosf(dot) * 180.0f / 3.14159265359f;
 }
 
+static int compare_lengths(const void *a, const void *b) {
+    float left = *(const float*)a, right = *(const float*)b;
+    if (isnan(left)) return !isnan(right);
+    if (isnan(right)) return -1;
+    return (left > right) - (left < right);
+}
+
+static uint32_t *build_histogram(const float *values, size_t count, float min, float max,
+                                 size_t bins, float *width) {
+    if (!bins) return NULL;
+    uint32_t *histogram = (uint32_t*)calloc(bins, sizeof(uint32_t));
+    if (!histogram) return NULL;
+    *width = (float)(((double)max - min) / bins);
+    for (size_t i = 0; i < count; i++) {
+        double position = *width > 0.0f ? ((double)values[i] - min) / *width : 0.0;
+        size_t bin = !(position > 0.0) ? 0 : position >= bins ? bins - 1 : (size_t)position;
+        histogram[bin]++;
+    }
+    return histogram;
+}
+
 /* ============================================================================
  * Edge Statistics
  * ============================================================================ */
@@ -63,14 +84,18 @@ geomlib_edge_stats geomlib_compute_edge_stats(
     const geomlib_trimesh *mesh,
     size_t histogram_bins
 ) {
-    geomlib_edge_stats stats;
-    stats.histogram = NULL;
-    stats.bin_count = histogram_bins;
+    geomlib_edge_stats stats = {0};
+    if (!mesh || !mesh->triangle_count) return stats;
 
     /* Build edge mesh */
     geomlib_edge_mesh edge_mesh = geomlib_build_edge_mesh(mesh);
 
     float *lengths = (float*)malloc(edge_mesh.edge_count * sizeof(float));
+    if (!edge_mesh.edge_count || !lengths) {
+        free(lengths);
+        geomlib_edge_mesh_free(&edge_mesh);
+        return stats;
+    }
     stats.min_length = FLT_MAX;
     stats.max_length = 0.0f;
     float sum = 0.0f;
@@ -88,16 +113,7 @@ geomlib_edge_stats geomlib_compute_edge_stats(
     stats.avg_length = sum / (float)edge_mesh.edge_count;
 
     /* Compute median and standard deviation */
-    /* Sort lengths for median calculation */
-    for (size_t i = 0; i < edge_mesh.edge_count - 1; i++) {
-        for (size_t j = i + 1; j < edge_mesh.edge_count; j++) {
-            if (lengths[i] > lengths[j]) {
-                float temp = lengths[i];
-                lengths[i] = lengths[j];
-                lengths[j] = temp;
-            }
-        }
-    }
+    qsort(lengths, edge_mesh.edge_count, sizeof(float), compare_lengths);
 
     /* Compute median */
     if (edge_mesh.edge_count % 2 == 0) {
@@ -114,17 +130,9 @@ geomlib_edge_stats geomlib_compute_edge_stats(
     }
     stats.std_dev = sqrtf(var_sum / (float)edge_mesh.edge_count);
 
-    /* Build histogram */
-    if (histogram_bins > 0) {
-        stats.histogram = (uint32_t*)calloc(histogram_bins, sizeof(uint32_t));
-        stats.bin_width = (stats.max_length - stats.min_length) / (float)histogram_bins;
-
-        for (size_t i = 0; i < edge_mesh.edge_count; i++) {
-            size_t bin = (size_t)((lengths[i] - stats.min_length) / stats.bin_width);
-            if (bin >= histogram_bins) bin = histogram_bins - 1;
-            stats.histogram[bin]++;
-        }
-    }
+    stats.histogram = build_histogram(lengths, edge_mesh.edge_count, stats.min_length, stats.max_length,
+                                      histogram_bins, &stats.bin_width);
+    if (stats.histogram) stats.bin_count = histogram_bins;
 
     free(lengths);
     geomlib_edge_mesh_free(&edge_mesh);
@@ -144,14 +152,12 @@ geomlib_angle_stats geomlib_compute_angle_stats(
     const geomlib_trimesh *mesh,
     size_t histogram_bins
 ) {
-    geomlib_angle_stats stats;
-    stats.histogram = NULL;
-    stats.bin_count = histogram_bins;
-    stats.degenerate_count = 0;
-    stats.poor_quality_count = 0;
+    geomlib_angle_stats stats = {0};
+    if (!mesh || !mesh->triangle_count) return stats;
 
     size_t angle_count = mesh->triangle_count * 3;
     float *angles = (float*)malloc(angle_count * sizeof(float));
+    if (!angles) return stats;
 
     stats.min_angle_deg = 180.0f;
     stats.max_angle_deg = 0.0f;
@@ -183,17 +189,9 @@ geomlib_angle_stats geomlib_compute_angle_stats(
 
     stats.avg_angle_deg = sum / (float)angle_count;
 
-    /* Build histogram */
-    if (histogram_bins > 0) {
-        stats.histogram = (uint32_t*)calloc(histogram_bins, sizeof(uint32_t));
-        stats.bin_width = 180.0f / (float)histogram_bins;
-
-        for (size_t i = 0; i < angle_count; i++) {
-            size_t bin = (size_t)(angles[i] / stats.bin_width);
-            if (bin >= histogram_bins) bin = histogram_bins - 1;
-            stats.histogram[bin]++;
-        }
-    }
+    stats.histogram = build_histogram(angles, angle_count, 0.0f, 180.0f,
+                                      histogram_bins, &stats.bin_width);
+    if (stats.histogram) stats.bin_count = histogram_bins;
 
     free(angles);
     return stats;
@@ -211,11 +209,11 @@ geomlib_area_stats geomlib_compute_area_stats(
     const geomlib_trimesh *mesh,
     size_t histogram_bins
 ) {
-    geomlib_area_stats stats;
-    stats.histogram = NULL;
-    stats.bin_count = histogram_bins;
+    geomlib_area_stats stats = {0};
+    if (!mesh || !mesh->triangle_count) return stats;
 
     float *areas = (float*)malloc(mesh->triangle_count * sizeof(float));
+    if (!areas) return stats;
     stats.min_area = FLT_MAX;
     stats.max_area = 0.0f;
     stats.total_area = 0.0f;
@@ -245,17 +243,9 @@ geomlib_area_stats geomlib_compute_area_stats(
     }
     stats.std_dev = sqrtf(var_sum / (float)mesh->triangle_count);
 
-    /* Build histogram */
-    if (histogram_bins > 0 && stats.max_area > stats.min_area) {
-        stats.histogram = (uint32_t*)calloc(histogram_bins, sizeof(uint32_t));
-        stats.bin_width = (stats.max_area - stats.min_area) / (float)histogram_bins;
-
-        for (size_t i = 0; i < mesh->triangle_count; i++) {
-            size_t bin = (size_t)((areas[i] - stats.min_area) / stats.bin_width);
-            if (bin >= histogram_bins) bin = histogram_bins - 1;
-            stats.histogram[bin]++;
-        }
-    }
+    stats.histogram = build_histogram(areas, mesh->triangle_count, stats.min_area, stats.max_area,
+                                      histogram_bins, &stats.bin_width);
+    if (stats.histogram) stats.bin_count = histogram_bins;
 
     free(areas);
     return stats;
@@ -273,14 +263,11 @@ geomlib_aspect_ratio_stats geomlib_compute_aspect_ratio_stats(
     const geomlib_trimesh *mesh,
     size_t histogram_bins
 ) {
-    geomlib_aspect_ratio_stats stats;
-    stats.histogram = NULL;
-    stats.bin_count = histogram_bins;
-    stats.good_count = 0;
-    stats.acceptable_count = 0;
-    stats.poor_count = 0;
+    geomlib_aspect_ratio_stats stats = {0};
+    if (!mesh || !mesh->triangle_count) return stats;
 
     float *ratios = (float*)malloc(mesh->triangle_count * sizeof(float));
+    if (!ratios) return stats;
     stats.min_ratio = FLT_MAX;
     stats.max_ratio = 0.0f;
     float sum = 0.0f;
@@ -304,17 +291,9 @@ geomlib_aspect_ratio_stats geomlib_compute_aspect_ratio_stats(
 
     stats.avg_ratio = sum / (float)mesh->triangle_count;
 
-    /* Build histogram */
-    if (histogram_bins > 0 && stats.max_ratio > stats.min_ratio) {
-        stats.histogram = (uint32_t*)calloc(histogram_bins, sizeof(uint32_t));
-        stats.bin_width = (stats.max_ratio - stats.min_ratio) / (float)histogram_bins;
-
-        for (size_t i = 0; i < mesh->triangle_count; i++) {
-            size_t bin = (size_t)((ratios[i] - stats.min_ratio) / stats.bin_width);
-            if (bin >= histogram_bins) bin = histogram_bins - 1;
-            stats.histogram[bin]++;
-        }
-    }
+    stats.histogram = build_histogram(ratios, mesh->triangle_count, stats.min_ratio, stats.max_ratio,
+                                      histogram_bins, &stats.bin_width);
+    if (stats.histogram) stats.bin_count = histogram_bins;
 
     free(ratios);
     return stats;
@@ -332,7 +311,8 @@ geomlib_mesh_stats geomlib_compute_mesh_stats(
     const geomlib_trimesh *mesh,
     size_t histogram_bins
 ) {
-    geomlib_mesh_stats stats;
+    geomlib_mesh_stats stats = {0};
+    if (!mesh) return stats;
 
     stats.vertex_count = mesh->vertex_count;
     stats.triangle_count = mesh->triangle_count;
@@ -375,114 +355,126 @@ void geomlib_mesh_stats_free(geomlib_mesh_stats *stats) {
 }
 
 /* ============================================================================
- * Mesh Validation (Basic)
+ * Mesh Validation
  * ============================================================================ */
 
-geomlib_validation_result geomlib_validate_mesh(
-    const geomlib_trimesh *mesh,
-    geomlib_validation_level level
-) {
-    geomlib_validation_result result;
-    result.is_valid = true;
+static bool add_validation_issue(geomlib_validation_result *result, size_t *capacity,
+                                 geomlib_validation_issue_type type, uint32_t index,
+                                 const char *message, bool error) {
+    if (result->issue_count == *capacity) {
+        size_t next = *capacity ? *capacity * 2 : 16;
+        if (next <= *capacity || next > SIZE_MAX / sizeof(*result->issues)) return false;
+        geomlib_validation_issue *issues = (geomlib_validation_issue*)realloc(
+            result->issues, next * sizeof(*issues));
+        if (!issues) return false;
+        result->issues = issues;
+        *capacity = next;
+    }
+    geomlib_validation_issue *issue = &result->issues[result->issue_count++];
+    issue->type = type;
+    issue->element_index = index;
+    snprintf(issue->message, sizeof(issue->message), "%s", message);
+    if (error) result->error_count++;
+    else result->warning_count++;
+    return true;
+}
+
+geomlib_validation_result geomlib_validate_mesh(const geomlib_trimesh *mesh,
+                                                geomlib_validation_level level) {
+    geomlib_validation_result result = {0};
     result.level = level;
-    result.issues = NULL;
-    result.issue_count = 0;
-    result.error_count = 0;
-    result.warning_count = 0;
+    size_t capacity = 0;
+    bool complete = true;
+    bool safe_topology = true;
+    bool strict_warning = false;
+    bool *used = NULL;
 
-    if (!mesh) {
-        return result;
+    if (!mesh || mesh->vertex_count > UINT32_MAX || mesh->triangle_count > UINT32_MAX / 3 ||
+        (mesh->vertex_count && !mesh->vertices) || (mesh->triangle_count && !mesh->indices)) {
+        complete = add_validation_issue(&result, &capacity, GEOMLIB_ISSUE_INVALID_MESH,
+                                        0, "Missing or invalid mesh storage", true);
+        goto finish;
     }
 
-    /* Allocate space for issues (worst case: all triangles have issues) */
-    size_t max_issues = mesh->triangle_count * 3;
-    geomlib_validation_issue *issues = (geomlib_validation_issue*)malloc(
-        max_issues * sizeof(geomlib_validation_issue));
-    if (!issues) {
-        return result;
+    if (level >= GEOMLIB_VALIDATE_STANDARD && mesh->vertex_count) {
+        used = (bool*)calloc(mesh->vertex_count, sizeof(bool));
+        if (!used) {
+            complete = false;
+            goto finish;
+        }
     }
-
-    size_t issue_count = 0;
-
-    /* Check for degenerate triangles */
-    for (size_t i = 0; i < mesh->triangle_count; i++) {
-        uint32_t i0 = mesh->indices[i * 3 + 0];
-        uint32_t i1 = mesh->indices[i * 3 + 1];
-        uint32_t i2 = mesh->indices[i * 3 + 2];
-
-        /* Check for invalid indices */
-        if (i0 >= mesh->vertex_count || i1 >= mesh->vertex_count || i2 >= mesh->vertex_count) {
-            issues[issue_count].type = GEOMLIB_ISSUE_INVALID_INDEX;
-            issues[issue_count].element_index = (uint32_t)i;
-            snprintf(issues[issue_count].message, 256,
-                    "Triangle %zu has out-of-bounds vertex index", i);
-            issue_count++;
-            result.error_count++;
-            result.is_valid = false;
-            continue;
-        }
-
-        /* Check for duplicate vertices in triangle */
-        if (i0 == i1 || i1 == i2 || i2 == i0) {
-            issues[issue_count].type = GEOMLIB_ISSUE_DUPLICATE_VERTEX;
-            issues[issue_count].element_index = (uint32_t)i;
-            snprintf(issues[issue_count].message, 256,
-                    "Triangle %zu has duplicate vertices", i);
-            issue_count++;
-            result.error_count++;
-            result.is_valid = false;
-            continue;
-        }
-
-        /* Check for zero-area triangles */
-        geomlib_vec3 v0 = mesh->vertices[i0];
-        geomlib_vec3 v1 = mesh->vertices[i1];
-        geomlib_vec3 v2 = mesh->vertices[i2];
-
-        geomlib_vec3 e1 = geomlib_vec3_sub(v1, v0);
-        geomlib_vec3 e2 = geomlib_vec3_sub(v2, v0);
-        geomlib_vec3 cross = geomlib_vec3_cross(e1, e2);
-        float area = geomlib_vec3_length(cross) * 0.5f;
-
-        if (area < 1e-10f) {
-            issues[issue_count].type = GEOMLIB_ISSUE_ZERO_AREA_TRIANGLE;
-            issues[issue_count].element_index = (uint32_t)i;
-            snprintf(issues[issue_count].message, 256,
-                    "Triangle %zu is degenerate (near-zero area)", i);
-            issue_count++;
-            result.warning_count++;
-            if (level >= GEOMLIB_VALIDATE_STRICT) {
-                result.is_valid = false;
+    for (uint32_t i = 0; i < mesh->triangle_count && complete; i++) {
+        const uint32_t *indices = &mesh->indices[i * 3];
+        if (used) {
+            for (int j = 0; j < 3; j++) {
+                if (indices[j] < mesh->vertex_count) used[indices[j]] = true;
             }
         }
-    }
-
-    /* Check for NaN or infinite vertices */
-    if (level >= GEOMLIB_VALIDATE_STRICT) {
-        for (size_t i = 0; i < mesh->vertex_count; i++) {
-            geomlib_vec3 v = mesh->vertices[i];
-            if (isnan(v.x) || isnan(v.y) || isnan(v.z) ||
-                isinf(v.x) || isinf(v.y) || isinf(v.z)) {
-                issues[issue_count].type = GEOMLIB_ISSUE_INVALID_INDEX;
-                issues[issue_count].element_index = (uint32_t)i;
-                snprintf(issues[issue_count].message, 256,
-                        "Vertex %zu has NaN or infinite coordinates", i);
-                issue_count++;
-                result.error_count++;
-                result.is_valid = false;
-            }
+        if (indices[0] >= mesh->vertex_count || indices[1] >= mesh->vertex_count ||
+            indices[2] >= mesh->vertex_count) {
+            safe_topology = false;
+            complete = add_validation_issue(&result, &capacity, GEOMLIB_ISSUE_INVALID_INDEX,
+                                            i, "Triangle has an out-of-bounds vertex index", true);
+        } else if (indices[0] == indices[1] || indices[1] == indices[2] || indices[0] == indices[2]) {
+            safe_topology = false;
+            complete = add_validation_issue(&result, &capacity, GEOMLIB_ISSUE_DUPLICATE_VERTEX,
+                                            i, "Triangle repeats a vertex index", true);
+        } else if (geomlib_is_degenerate_triangle(mesh->vertices[indices[0]],
+                                                  mesh->vertices[indices[1]],
+                                                  mesh->vertices[indices[2]], 1e-10f)) {
+            strict_warning = true;
+            complete = add_validation_issue(&result, &capacity, GEOMLIB_ISSUE_ZERO_AREA_TRIANGLE,
+                                            i, "Triangle has near-zero area", false);
         }
     }
 
-    /* Store results */
-    if (issue_count > 0) {
-        result.issues = (geomlib_validation_issue*)realloc(issues,
-            issue_count * sizeof(geomlib_validation_issue));
-        result.issue_count = issue_count;
-    } else {
-        free(issues);
+    if (level < GEOMLIB_VALIDATE_STANDARD || !complete) goto finish;
+    for (uint32_t i = 0; i < mesh->vertex_count && complete; i++) {
+        geomlib_vec3 p = mesh->vertices[i];
+        if (!isfinite(p.x) || !isfinite(p.y) || !isfinite(p.z)) {
+            safe_topology = false;
+            complete = add_validation_issue(&result, &capacity, GEOMLIB_ISSUE_NONFINITE_VERTEX,
+                                            i, "Vertex has nonfinite coordinates", true);
+        }
+        if (complete && !used[i]) {
+            complete = add_validation_issue(&result, &capacity, GEOMLIB_ISSUE_UNUSED_VERTEX,
+                                            i, "Vertex is unused", false);
+        }
+    }
+    if (!safe_topology || !complete) goto finish;
+
+    geomlib_manifold_analysis topology = geomlib_analyze_manifold(mesh);
+    for (size_t i = 0; i < topology.nonmanifold_count && complete; i++) {
+        const geomlib_nonmanifold_element *element = &topology.nonmanifold_elements[i];
+        bool edge = element->type == GEOMLIB_NONMANIFOLD_EDGE;
+        complete = add_validation_issue(&result, &capacity,
+            edge ? GEOMLIB_ISSUE_NON_MANIFOLD_EDGE : GEOMLIB_ISSUE_NON_MANIFOLD_VERTEX,
+            element->index, edge ? "Edge has more than two incident faces" : "Vertex has a nonmanifold fan",
+            true);
+    }
+    if (complete && !topology.is_oriented && topology.is_edge_manifold) {
+        complete = add_validation_issue(&result, &capacity, GEOMLIB_ISSUE_INCONSISTENT_ORIENTATION,
+                                        0, "Mesh has inconsistent face winding", true);
+    }
+    if (!topology.is_manifold && !topology.nonmanifold_count) complete = false;
+    geomlib_manifold_analysis_free(&topology);
+
+    if (complete && level >= GEOMLIB_VALIDATE_STRICT) {
+        geomlib_self_intersection intersections = geomlib_detect_self_intersections(mesh);
+        for (size_t i = 0; i < intersections.pair_count && complete; i++) {
+            char message[96];
+            const geomlib_intersection_pair *pair = &intersections.pairs[i];
+            snprintf(message, sizeof(message), "Triangle intersects triangle %u", (unsigned)pair->face1);
+            complete = add_validation_issue(&result, &capacity, GEOMLIB_ISSUE_SELF_INTERSECTION,
+                                            pair->face0, message, true);
+        }
+        geomlib_self_intersection_free(&intersections);
     }
 
+finish:
+    free(used);
+    result.is_valid = complete && !result.error_count &&
+                      !(level >= GEOMLIB_VALIDATE_STRICT && strict_warning);
     return result;
 }
 
@@ -491,7 +483,7 @@ void geomlib_validation_result_free(geomlib_validation_result *result) {
 }
 
 /* ============================================================================
- * Mesh Comparison (Stub)
+ * Mesh Comparison
  * ============================================================================ */
 
 geomlib_mesh_difference geomlib_compare_meshes(
@@ -514,7 +506,14 @@ geomlib_mesh_difference geomlib_compare_meshes(
         (mesh1->triangle_count - mesh2->triangle_count) :
         (mesh2->triangle_count - mesh1->triangle_count);
 
-    /* Compute Hausdorff distance (one direction: mesh1 to mesh2) */
+    if ((!mesh1->triangle_count && mesh2->vertex_count) ||
+        (!mesh2->triangle_count && mesh1->vertex_count)) {
+        diff.hausdorff_distance = diff.avg_distance = diff.rms_distance = FLT_MAX;
+        return diff;
+    }
+    if (!mesh1->vertex_count && !mesh2->vertex_count) return diff;
+
+    /* Sample the distance from mesh1 vertices to mesh2 triangles. */
     float max_dist_1to2 = 0.0f;
     float sum_dist_1to2 = 0.0f;
     float sum_sq_dist_1to2 = 0.0f;

@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <limits.h>
 
 /* ============================================================================
  * Edge Hash Map for Fast Edge Lookup
@@ -20,7 +21,9 @@ typedef struct edge_hash_entry {
     edge_key key;
     uint32_t edge_index;
     uint32_t face_count;
-    uint32_t faces[4];  /* Up to 4 faces (non-manifold if >2) */
+    uint32_t forward_count;
+    uint32_t faces[2];
+    uint32_t first_corner[2];
     struct edge_hash_entry *next;
 } edge_hash_entry;
 
@@ -46,7 +49,7 @@ static edge_hash_map edge_hash_map_create(size_t capacity) {
 }
 
 static void edge_hash_map_free(edge_hash_map *map) {
-    for (size_t i = 0; i < map->bucket_count; i++) {
+    for (size_t i = 0; map->buckets && i < map->bucket_count; i++) {
         edge_hash_entry *entry = map->buckets[i];
         while (entry) {
             edge_hash_entry *next = entry->next;
@@ -78,6 +81,7 @@ static edge_hash_entry* edge_hash_map_insert(edge_hash_map *map, edge_key key) {
 
     uint32_t bucket = hash_edge(key, map->bucket_count);
     edge_hash_entry *entry = (edge_hash_entry*)calloc(1, sizeof(edge_hash_entry));
+    if (!entry) return NULL;
     entry->key = key;
     entry->edge_index = (uint32_t)map->entry_count++;
     entry->face_count = 0;
@@ -103,88 +107,100 @@ static edge_key make_edge_key(uint32_t v0, uint32_t v1) {
  * Edge Mesh Construction
  * ============================================================================ */
 
-geomlib_edge_mesh geomlib_build_edge_mesh(const geomlib_trimesh *mesh) {
-    geomlib_edge_mesh edge_mesh;
+static uint32_t find_root(uint32_t *parent, uint32_t x);
+static void union_sets(uint32_t *parent, uint32_t *rank, uint32_t x, uint32_t y);
 
-    /* Build edge hash map */
-    size_t estimated_edges = mesh->triangle_count * 3 / 2;  /* Euler: E ≈ 1.5F for closed */
-    edge_hash_map map = edge_hash_map_create(estimated_edges * 2);
+static bool build_edge_map(const geomlib_trimesh *mesh, edge_hash_map *map,
+                           uint32_t *parent, uint32_t *rank) {
+    if (!mesh || mesh->triangle_count > UINT32_MAX / 3 ||
+        (mesh->triangle_count && !mesh->indices)) return false;
+    *map = edge_hash_map_create(mesh->triangle_count * 3);
+    if (!map->buckets) return false;
 
-    /* Insert all edges */
-    for (size_t i = 0; i < mesh->triangle_count; i++) {
-        uint32_t v0 = mesh->indices[i * 3 + 0];
-        uint32_t v1 = mesh->indices[i * 3 + 1];
-        uint32_t v2 = mesh->indices[i * 3 + 2];
+    for (size_t face = 0; face < mesh->triangle_count; face++) {
+        for (int i = 0; i < 3; i++) {
+            uint32_t a = (uint32_t)(face * 3 + i);
+            uint32_t b = (uint32_t)(face * 3 + (i + 1) % 3);
+            uint32_t va = mesh->indices[a], vb = mesh->indices[b];
+            if (va >= mesh->vertex_count || vb >= mesh->vertex_count) return false;
+            edge_hash_entry *edge = edge_hash_map_insert(map, make_edge_key(va, vb));
+            if (!edge) return false;
 
-        edge_key edges[3] = {
-            make_edge_key(v0, v1),
-            make_edge_key(v1, v2),
-            make_edge_key(v2, v0)
-        };
-
-        for (int j = 0; j < 3; j++) {
-            edge_hash_entry *entry = edge_hash_map_insert(&map, edges[j]);
-            if (entry->face_count < 4) {
-                entry->faces[entry->face_count++] = (uint32_t)i;
+            bool forward = va < vb;
+            uint32_t low = forward ? a : b;
+            uint32_t high = forward ? b : a;
+            if (!edge->face_count) {
+                edge->first_corner[0] = low;
+                edge->first_corner[1] = high;
+            } else if (parent) {
+                union_sets(parent, rank, low, edge->first_corner[0]);
+                union_sets(parent, rank, high, edge->first_corner[1]);
             }
+            if (edge->face_count < 2) edge->faces[edge->face_count] = (uint32_t)face;
+            edge->face_count++;
+            edge->forward_count += forward;
         }
     }
+    return true;
+}
 
-    /* Build edge array */
-    edge_mesh.edge_count = map.entry_count;
-    edge_mesh.vertex_count = mesh->vertex_count;
-    edge_mesh.edges = (geomlib_edge*)malloc(edge_mesh.edge_count * sizeof(geomlib_edge));
+geomlib_edge_mesh geomlib_build_edge_mesh(const geomlib_trimesh *mesh) {
+    geomlib_edge_mesh result = {0};
+    edge_hash_map map = {0};
+    if (!build_edge_map(mesh, &map, NULL, NULL)) {
+        edge_hash_map_free(&map);
+        return result;
+    }
 
-    size_t edge_idx = 0;
+    result.edge_count = map.entry_count;
+    result.vertex_count = mesh->vertex_count;
+    result.edges = (geomlib_edge*)malloc(result.edge_count * sizeof(geomlib_edge));
+    result.vertex_edges = (uint32_t**)calloc(result.vertex_count, sizeof(uint32_t*));
+    result.vertex_edge_count = (uint32_t*)calloc(result.vertex_count, sizeof(uint32_t));
+    if ((result.edge_count && !result.edges) ||
+        (result.vertex_count && (!result.vertex_edges || !result.vertex_edge_count))) goto error;
+
+    size_t index = 0;
     for (size_t i = 0; i < map.bucket_count; i++) {
-        edge_hash_entry *entry = map.buckets[i];
-        while (entry) {
-            edge_mesh.edges[edge_idx].v0 = entry->key.v0;
-            edge_mesh.edges[edge_idx].v1 = entry->key.v1;
-            edge_mesh.edges[edge_idx].face0 = entry->faces[0];
-            edge_mesh.edges[edge_idx].face1 = entry->face_count > 1 ? entry->faces[1] : UINT32_MAX;
-            edge_idx++;
-            entry = entry->next;
+        for (edge_hash_entry *edge = map.buckets[i]; edge; edge = edge->next) {
+            geomlib_edge *out = &result.edges[index++];
+            out->v0 = edge->key.v0;
+            out->v1 = edge->key.v1;
+            out->face0 = edge->faces[0];
+            out->face1 = edge->face_count > 1 ? edge->faces[1] : UINT32_MAX;
+            result.vertex_edge_count[out->v0]++;
+            result.vertex_edge_count[out->v1]++;
         }
     }
 
-    /* Build vertex edge lists */
-    edge_mesh.vertex_edges = (uint32_t**)calloc(mesh->vertex_count, sizeof(uint32_t*));
-    edge_mesh.vertex_edge_count = (uint32_t*)calloc(mesh->vertex_count, sizeof(uint32_t));
-
-    /* Count edges per vertex */
-    for (size_t i = 0; i < edge_mesh.edge_count; i++) {
-        edge_mesh.vertex_edge_count[edge_mesh.edges[i].v0]++;
-        edge_mesh.vertex_edge_count[edge_mesh.edges[i].v1]++;
+    for (size_t i = 0; i < result.vertex_count; i++) {
+        if (!result.vertex_edge_count[i]) continue;
+        result.vertex_edges[i] = (uint32_t*)malloc(result.vertex_edge_count[i] * sizeof(uint32_t));
+        if (!result.vertex_edges[i]) goto error;
+        result.vertex_edge_count[i] = 0;
     }
-
-    /* Allocate and fill */
-    uint32_t *counts = (uint32_t*)calloc(mesh->vertex_count, sizeof(uint32_t));
-    for (size_t i = 0; i < mesh->vertex_count; i++) {
-        edge_mesh.vertex_edges[i] = (uint32_t*)malloc(
-            edge_mesh.vertex_edge_count[i] * sizeof(uint32_t));
+    for (size_t i = 0; i < result.edge_count; i++) {
+        uint32_t a = result.edges[i].v0, b = result.edges[i].v1;
+        result.vertex_edges[a][result.vertex_edge_count[a]++] = (uint32_t)i;
+        result.vertex_edges[b][result.vertex_edge_count[b]++] = (uint32_t)i;
     }
-
-    for (size_t i = 0; i < edge_mesh.edge_count; i++) {
-        uint32_t v0 = edge_mesh.edges[i].v0;
-        uint32_t v1 = edge_mesh.edges[i].v1;
-        edge_mesh.vertex_edges[v0][counts[v0]++] = (uint32_t)i;
-        edge_mesh.vertex_edges[v1][counts[v1]++] = (uint32_t)i;
-    }
-
-    free(counts);
     edge_hash_map_free(&map);
+    return result;
 
-    return edge_mesh;
+error:
+    edge_hash_map_free(&map);
+    geomlib_edge_mesh_free(&result);
+    return result;
 }
 
 void geomlib_edge_mesh_free(geomlib_edge_mesh *edge_mesh) {
     free(edge_mesh->edges);
-    for (size_t i = 0; i < edge_mesh->vertex_count; i++) {
+    for (size_t i = 0; edge_mesh->vertex_edges && i < edge_mesh->vertex_count; i++) {
         free(edge_mesh->vertex_edges[i]);
     }
     free(edge_mesh->vertex_edges);
     free(edge_mesh->vertex_edge_count);
+    memset(edge_mesh, 0, sizeof(*edge_mesh));
 }
 
 /* ============================================================================
@@ -194,7 +210,8 @@ void geomlib_edge_mesh_free(geomlib_edge_mesh *edge_mesh) {
 geomlib_euler_characteristic geomlib_compute_euler_characteristic(
     const geomlib_trimesh *mesh
 ) {
-    geomlib_euler_characteristic result;
+    geomlib_euler_characteristic result = {0};
+    if (!mesh) return result;
 
     result.vertices = (int32_t)mesh->vertex_count;
     result.faces = (int32_t)mesh->triangle_count;
@@ -202,14 +219,6 @@ geomlib_euler_characteristic geomlib_compute_euler_characteristic(
     /* Build edge mesh to count edges */
     geomlib_edge_mesh edge_mesh = geomlib_build_edge_mesh(mesh);
     result.edges = (int32_t)edge_mesh.edge_count;
-
-    /* Count boundary edges */
-    int32_t boundary_edges = 0;
-    for (size_t i = 0; i < edge_mesh.edge_count; i++) {
-        if (edge_mesh.edges[i].face1 == UINT32_MAX) {
-            boundary_edges++;
-        }
-    }
 
     /* Compute connected components */
     geomlib_component_info components = geomlib_find_connected_components(mesh);
@@ -244,6 +253,10 @@ bool geomlib_is_boundary_vertex(
     geomlib_edge_mesh edge_mesh = geomlib_build_edge_mesh(mesh);
 
     bool is_boundary = false;
+    if (vertex_idx >= edge_mesh.vertex_count) {
+        geomlib_edge_mesh_free(&edge_mesh);
+        return false;
+    }
     for (uint32_t i = 0; i < edge_mesh.vertex_edge_count[vertex_idx]; i++) {
         uint32_t edge_idx = edge_mesh.vertex_edges[vertex_idx][i];
         if (edge_mesh.edges[edge_idx].face1 == UINT32_MAX) {
@@ -256,92 +269,73 @@ bool geomlib_is_boundary_vertex(
     return is_boundary;
 }
 
-geomlib_boundary_loops geomlib_extract_boundary_loops(
-    const geomlib_trimesh *mesh
-) {
-    geomlib_boundary_loops result;
-    result.loops = NULL;
-    result.loop_count = 0;
+geomlib_boundary_loops geomlib_extract_boundary_loops(const geomlib_trimesh *mesh) {
+    geomlib_boundary_loops result = {0};
+    geomlib_edge_mesh edges = geomlib_build_edge_mesh(mesh);
+    if (!edges.edge_count || !mesh->vertices) {
+        geomlib_edge_mesh_free(&edges);
+        return result;
+    }
+    uint32_t *degree = (uint32_t*)calloc(edges.vertex_count, sizeof(uint32_t));
+    bool *visited = (bool*)calloc(edges.edge_count, sizeof(bool));
+    uint32_t *path = (uint32_t*)malloc(edges.edge_count * sizeof(uint32_t));
+    if (!degree || !visited || !path) goto finish;
 
-    geomlib_edge_mesh edge_mesh = geomlib_build_edge_mesh(mesh);
+    for (size_t i = 0; i < edges.edge_count; i++) {
+        if (edges.edges[i].face1 != UINT32_MAX) continue;
+        degree[edges.edges[i].v0]++;
+        degree[edges.edges[i].v1]++;
+    }
 
-    /* Mark boundary edges */
-    bool *visited = (bool*)calloc(edge_mesh.edge_count, sizeof(bool));
-
-    /* Dynamic array for loops */
-    size_t loop_capacity = 4;
-    result.loops = (geomlib_boundary_loop*)malloc(loop_capacity * sizeof(geomlib_boundary_loop));
-
-    for (size_t start_edge = 0; start_edge < edge_mesh.edge_count; start_edge++) {
-        if (visited[start_edge] || edge_mesh.edges[start_edge].face1 != UINT32_MAX) {
-            continue;  /* Not a boundary edge or already visited */
-        }
-
-        /* Start new loop */
-        size_t vertex_capacity = 16;
-        uint32_t *loop_vertices = (uint32_t*)malloc(vertex_capacity * sizeof(uint32_t));
-        size_t vertex_count = 0;
-        float total_length = 0.0f;
-
-        /* Walk the boundary */
-        uint32_t current_edge = (uint32_t)start_edge;
-        uint32_t current_vertex = edge_mesh.edges[current_edge].v0;
-
+    size_t capacity = 0;
+    for (size_t i = 0; i < edges.edge_count; i++) {
+        if (visited[i] || edges.edges[i].face1 != UINT32_MAX) continue;
+        uint32_t start = edges.edges[i].v0, vertex = start;
+        if (degree[start] != 2) continue;
+        uint32_t edge = (uint32_t)i;
+        size_t count = 0;
+        float length = 0.0f;
         do {
-            /* Add vertex */
-            if (vertex_count >= vertex_capacity) {
-                vertex_capacity *= 2;
-                loop_vertices = (uint32_t*)realloc(loop_vertices, vertex_capacity * sizeof(uint32_t));
-            }
-            loop_vertices[vertex_count++] = current_vertex;
-
-            /* Mark edge as visited */
-            visited[current_edge] = true;
-
-            /* Find next boundary edge */
-            uint32_t next_vertex = (edge_mesh.edges[current_edge].v0 == current_vertex) ?
-                edge_mesh.edges[current_edge].v1 : edge_mesh.edges[current_edge].v0;
-
-            /* Add edge length */
-            geomlib_vec3 v0 = mesh->vertices[current_vertex];
-            geomlib_vec3 v1 = mesh->vertices[next_vertex];
-            total_length += geomlib_vec3_length(geomlib_vec3_sub(v1, v0));
-
-            /* Find next edge */
-            bool found = false;
-            for (uint32_t i = 0; i < edge_mesh.vertex_edge_count[next_vertex]; i++) {
-                uint32_t candidate = edge_mesh.vertex_edges[next_vertex][i];
-                if (candidate != current_edge &&
-                    edge_mesh.edges[candidate].face1 == UINT32_MAX &&
-                    !visited[candidate]) {
-                    current_edge = candidate;
-                    current_vertex = next_vertex;
-                    found = true;
+            visited[edge] = true;
+            path[count++] = vertex;
+            geomlib_edge current = edges.edges[edge];
+            uint32_t next = current.v0 == vertex ? current.v1 : current.v0;
+            length += geomlib_vec3_length(geomlib_vec3_sub(mesh->vertices[vertex], mesh->vertices[next]));
+            vertex = next;
+            if (vertex == start || degree[vertex] != 2) break;
+            edge = UINT32_MAX;
+            for (uint32_t j = 0; j < edges.vertex_edge_count[vertex]; j++) {
+                uint32_t candidate = edges.vertex_edges[vertex][j];
+                if (!visited[candidate] && edges.edges[candidate].face1 == UINT32_MAX) {
+                    edge = candidate;
                     break;
                 }
             }
+        } while (edge != UINT32_MAX);
 
-            if (!found) {
-                break;  /* Loop complete or error */
-            }
-        } while (current_edge != start_edge && vertex_count < mesh->vertex_count);
-
-        /* Store loop */
-        if (result.loop_count >= loop_capacity) {
-            loop_capacity *= 2;
-            result.loops = (geomlib_boundary_loop*)realloc(
-                result.loops, loop_capacity * sizeof(geomlib_boundary_loop));
+        if (vertex != start || count < 3) continue;
+        if (result.loop_count == capacity) {
+            size_t next_capacity = capacity ? capacity * 2 : 4;
+            geomlib_boundary_loop *loops = (geomlib_boundary_loop*)realloc(
+                result.loops, next_capacity * sizeof(*loops));
+            if (!loops) goto error;
+            result.loops = loops;
+            capacity = next_capacity;
         }
-
-        result.loops[result.loop_count].vertices = loop_vertices;
-        result.loops[result.loop_count].vertex_count = vertex_count;
-        result.loops[result.loop_count].length = total_length;
-        result.loop_count++;
+        uint32_t *vertices = (uint32_t*)malloc(count * sizeof(uint32_t));
+        if (!vertices) goto error;
+        memcpy(vertices, path, count * sizeof(uint32_t));
+        result.loops[result.loop_count++] = (geomlib_boundary_loop){vertices, count, length};
     }
-
+    goto finish;
+error:
+    geomlib_boundary_loops_free(&result);
+    result = (geomlib_boundary_loops){0};
+finish:
+    free(degree);
     free(visited);
-    geomlib_edge_mesh_free(&edge_mesh);
-
+    free(path);
+    geomlib_edge_mesh_free(&edges);
     return result;
 }
 
@@ -517,68 +511,88 @@ int geomlib_extract_largest_component(
  * Manifold Detection
  * ============================================================================ */
 
-geomlib_manifold_analysis geomlib_analyze_manifold(
-    const geomlib_trimesh *mesh
-) {
-    geomlib_manifold_analysis analysis;
-    analysis.is_edge_manifold = true;
-    analysis.is_vertex_manifold = true;
-    analysis.is_oriented = true;
-    analysis.nonmanifold_elements = NULL;
-    analysis.nonmanifold_count = 0;
+/* Corners joined by an edge at a vertex belong to the same incident fan. */
+static uint32_t *build_corner_fans(const geomlib_trimesh *mesh, edge_hash_map *map) {
+    if (mesh->triangle_count > UINT32_MAX / 3 ||
+        mesh->triangle_count > SIZE_MAX / (3 * sizeof(uint32_t))) return NULL;
+    size_t count = mesh->triangle_count * 3;
+    uint32_t *parent = (uint32_t*)malloc(count * sizeof(uint32_t));
+    uint32_t *rank = (uint32_t*)calloc(count, sizeof(uint32_t));
+    if (!parent || !rank) {
+        free(parent);
+        free(rank);
+        return NULL;
+    }
+    for (size_t i = 0; i < count; i++) parent[i] = (uint32_t)i;
+    bool ok = build_edge_map(mesh, map, parent, rank);
+    free(rank);
+    if (!ok) {
+        free(parent);
+        return NULL;
+    }
+    for (size_t i = 0; i < count; i++) parent[i] = find_root(parent, (uint32_t)i);
+    return parent;
+}
 
-    geomlib_edge_mesh edge_mesh = geomlib_build_edge_mesh(mesh);
+geomlib_manifold_analysis geomlib_analyze_manifold(const geomlib_trimesh *mesh) {
+    geomlib_manifold_analysis result = {0};
+    if (!mesh) return result;
+    result.is_manifold = result.is_edge_manifold = result.is_vertex_manifold = true;
+    result.is_closed = result.is_oriented = true;
+    if (!mesh->triangle_count) return result;
 
-    /* Check edge manifold (each edge has at most 2 faces) */
-    size_t nm_capacity = 16;
-    geomlib_nonmanifold_element *nm_elements = (geomlib_nonmanifold_element*)malloc(
-        nm_capacity * sizeof(geomlib_nonmanifold_element));
-
-    size_t boundary_count = 0;
-    for (size_t i = 0; i < edge_mesh.edge_count; i++) {
-        uint32_t face_count = (edge_mesh.edges[i].face1 == UINT32_MAX) ? 1 : 2;
-
-        /* Count actual faces (check for >2) */
-        edge_key key = make_edge_key(edge_mesh.edges[i].v0, edge_mesh.edges[i].v1);
-        size_t actual_count = 0;
-        for (size_t j = 0; j < mesh->triangle_count; j++) {
-            for (int k = 0; k < 3; k++) {
-                uint32_t v0 = mesh->indices[j * 3 + k];
-                uint32_t v1 = mesh->indices[j * 3 + ((k + 1) % 3)];
-                edge_key test = make_edge_key(v0, v1);
-                if (test.v0 == key.v0 && test.v1 == key.v1) {
-                    actual_count++;
-                }
-            }
-        }
-
-        if (actual_count > 2) {
-            analysis.is_edge_manifold = false;
-
-            if (analysis.nonmanifold_count >= nm_capacity) {
-                nm_capacity *= 2;
-                nm_elements = (geomlib_nonmanifold_element*)realloc(
-                    nm_elements, nm_capacity * sizeof(geomlib_nonmanifold_element));
-            }
-
-            nm_elements[analysis.nonmanifold_count].type = GEOMLIB_NONMANIFOLD_EDGE;
-            nm_elements[analysis.nonmanifold_count].index = (uint32_t)i;
-            nm_elements[analysis.nonmanifold_count].face_count = (uint32_t)actual_count;
-            analysis.nonmanifold_count++;
-        }
-
-        if (face_count == 1) {
-            boundary_count++;
-        }
+    edge_hash_map map = {0};
+    uint32_t *fans = build_corner_fans(mesh, &map);
+    uint32_t *first = (uint32_t*)malloc(mesh->vertex_count * sizeof(uint32_t));
+    uint32_t *incident = (uint32_t*)calloc(mesh->vertex_count, sizeof(uint32_t));
+    bool *nonmanifold = (bool*)calloc(mesh->vertex_count, sizeof(bool));
+    if (!fans || !first || !incident || !nonmanifold) goto error;
+    memset(first, 0xff, mesh->vertex_count * sizeof(uint32_t));
+    for (size_t i = 0; i < mesh->triangle_count * 3; i++) {
+        uint32_t vertex = mesh->indices[i];
+        if (first[vertex] == UINT32_MAX) first[vertex] = fans[i];
+        if (first[vertex] != fans[i]) nonmanifold[vertex] = true;
+        incident[vertex]++;
     }
 
-    analysis.is_closed = (boundary_count == 0);
-    analysis.is_manifold = analysis.is_edge_manifold && analysis.is_vertex_manifold;
-    analysis.nonmanifold_elements = nm_elements;
-
-    geomlib_edge_mesh_free(&edge_mesh);
-
-    return analysis;
+    result.nonmanifold_elements = (geomlib_nonmanifold_element*)malloc(
+        (map.entry_count + mesh->vertex_count) * sizeof(geomlib_nonmanifold_element));
+    if (!result.nonmanifold_elements) goto error;
+    uint32_t index = 0;
+    for (size_t i = 0; i < map.bucket_count; i++) {
+        for (edge_hash_entry *edge = map.buckets[i]; edge; edge = edge->next, index++) {
+            if (edge->face_count == 1) result.is_closed = false;
+            if (edge->face_count == 2 && edge->forward_count != 1) result.is_oriented = false;
+            if (edge->face_count > 2) {
+                result.is_edge_manifold = false;
+                result.is_oriented = false;
+                nonmanifold[edge->key.v0] = nonmanifold[edge->key.v1] = true;
+                result.nonmanifold_elements[result.nonmanifold_count++] =
+                    (geomlib_nonmanifold_element){GEOMLIB_NONMANIFOLD_EDGE, index, edge->face_count};
+            }
+        }
+    }
+    for (size_t v = 0; v < mesh->vertex_count; v++) {
+        if (!nonmanifold[v]) continue;
+        result.is_vertex_manifold = false;
+        result.nonmanifold_elements[result.nonmanifold_count++] =
+            (geomlib_nonmanifold_element){GEOMLIB_NONMANIFOLD_VERTEX, (uint32_t)v, incident[v]};
+    }
+    result.is_manifold = result.is_edge_manifold && result.is_vertex_manifold;
+    if (!result.nonmanifold_count) {
+        free(result.nonmanifold_elements);
+        result.nonmanifold_elements = NULL;
+    }
+    goto finish;
+error:
+    result = (geomlib_manifold_analysis){0};
+finish:
+    free(fans);
+    free(first);
+    free(incident);
+    free(nonmanifold);
+    edge_hash_map_free(&map);
+    return result;
 }
 
 void geomlib_manifold_analysis_free(geomlib_manifold_analysis *analysis) {
@@ -589,67 +603,60 @@ void geomlib_manifold_analysis_free(geomlib_manifold_analysis *analysis) {
  * Vertex Adjacency
  * ============================================================================ */
 
-geomlib_vertex_adjacency geomlib_build_vertex_adjacency(
-    const geomlib_trimesh *mesh
-) {
-    geomlib_vertex_adjacency adjacency;
+geomlib_vertex_adjacency geomlib_build_vertex_adjacency(const geomlib_trimesh *mesh) {
+    geomlib_vertex_adjacency result = {0};
+    if (!mesh || !mesh->vertex_count || mesh->triangle_count > UINT32_MAX / 6 ||
+        mesh->triangle_count > SIZE_MAX / (6 * sizeof(uint32_t)) ||
+        (mesh->triangle_count && !mesh->indices)) return result;
 
-    adjacency.neighbors = (uint32_t**)calloc(mesh->vertex_count, sizeof(uint32_t*));
-    adjacency.neighbor_counts = (uint32_t*)calloc(mesh->vertex_count, sizeof(uint32_t));
-    adjacency.faces = (uint32_t**)calloc(mesh->vertex_count, sizeof(uint32_t*));
-    adjacency.face_counts = (uint32_t*)calloc(mesh->vertex_count, sizeof(uint32_t));
+    size_t count = mesh->triangle_count * 3;
+    result.neighbors = (uint32_t**)calloc(mesh->vertex_count, sizeof(uint32_t*));
+    result.faces = (uint32_t**)calloc(mesh->vertex_count, sizeof(uint32_t*));
+    result.neighbor_counts = (uint32_t*)calloc(mesh->vertex_count, sizeof(uint32_t));
+    result.face_counts = (uint32_t*)calloc(mesh->vertex_count, sizeof(uint32_t));
+    if (!result.neighbors || !result.faces || !result.neighbor_counts || !result.face_counts) goto error;
+    if (!count) return result;
 
-    /* Count adjacencies */
-    for (size_t i = 0; i < mesh->triangle_count; i++) {
-        for (int j = 0; j < 3; j++) {
-            uint32_t v = mesh->indices[i * 3 + j];
-            adjacency.neighbor_counts[v] += 2;  /* Two neighbors per face */
-            adjacency.face_counts[v]++;
+    result.neighbors[0] = (uint32_t*)malloc(count * 2 * sizeof(uint32_t));
+    result.faces[0] = (uint32_t*)malloc(count * sizeof(uint32_t));
+    if (!result.neighbors[0] || !result.faces[0]) goto error;
+
+    for (size_t i = 0; i < count; i++) {
+        uint32_t vertex = mesh->indices[i];
+        if (vertex >= mesh->vertex_count) goto error;
+        result.face_counts[vertex]++;
+    }
+    size_t offset = 0;
+    for (size_t i = 0; i < mesh->vertex_count; i++) {
+        result.neighbors[i] = result.neighbors[0] + offset * 2;
+        result.faces[i] = result.faces[0] + offset;
+        offset += result.face_counts[i];
+        result.face_counts[i] = 0;
+    }
+    for (size_t face = 0; face < mesh->triangle_count; face++) {
+        const uint32_t *vertices = &mesh->indices[face * 3];
+        for (int i = 0; i < 3; i++) {
+            uint32_t vertex = vertices[i];
+            result.neighbors[vertex][result.neighbor_counts[vertex]++] = vertices[(i + 1) % 3];
+            result.neighbors[vertex][result.neighbor_counts[vertex]++] = vertices[(i + 2) % 3];
+            result.faces[vertex][result.face_counts[vertex]++] = (uint32_t)face;
         }
     }
+    return result;
 
-    /* Allocate */
-    for (size_t i = 0; i < mesh->vertex_count; i++) {
-        adjacency.neighbors[i] = (uint32_t*)malloc(adjacency.neighbor_counts[i] * sizeof(uint32_t));
-        adjacency.faces[i] = (uint32_t*)malloc(adjacency.face_counts[i] * sizeof(uint32_t));
-    }
-
-    /* Fill */
-    uint32_t *n_counts = (uint32_t*)calloc(mesh->vertex_count, sizeof(uint32_t));
-    uint32_t *f_counts = (uint32_t*)calloc(mesh->vertex_count, sizeof(uint32_t));
-
-    for (size_t i = 0; i < mesh->triangle_count; i++) {
-        uint32_t v0 = mesh->indices[i * 3 + 0];
-        uint32_t v1 = mesh->indices[i * 3 + 1];
-        uint32_t v2 = mesh->indices[i * 3 + 2];
-
-        adjacency.neighbors[v0][n_counts[v0]++] = v1;
-        adjacency.neighbors[v0][n_counts[v0]++] = v2;
-        adjacency.neighbors[v1][n_counts[v1]++] = v0;
-        adjacency.neighbors[v1][n_counts[v1]++] = v2;
-        adjacency.neighbors[v2][n_counts[v2]++] = v0;
-        adjacency.neighbors[v2][n_counts[v2]++] = v1;
-
-        adjacency.faces[v0][f_counts[v0]++] = (uint32_t)i;
-        adjacency.faces[v1][f_counts[v1]++] = (uint32_t)i;
-        adjacency.faces[v2][f_counts[v2]++] = (uint32_t)i;
-    }
-
-    free(n_counts);
-    free(f_counts);
-
-    return adjacency;
+error:
+    geomlib_vertex_adjacency_free(&result);
+    return result;
 }
 
 void geomlib_vertex_adjacency_free(geomlib_vertex_adjacency *adjacency) {
-    for (size_t i = 0; i < adjacency->neighbor_counts[0]; i++) {  /* Assumes all allocated */
-        free(adjacency->neighbors[i]);
-        free(adjacency->faces[i]);
-    }
+    if (adjacency->neighbors) free(adjacency->neighbors[0]);
+    if (adjacency->faces) free(adjacency->faces[0]);
     free(adjacency->neighbors);
     free(adjacency->neighbor_counts);
     free(adjacency->faces);
     free(adjacency->face_counts);
+    memset(adjacency, 0, sizeof(*adjacency));
 }
 
 /* ============================================================================
@@ -659,49 +666,31 @@ void geomlib_vertex_adjacency_free(geomlib_vertex_adjacency *adjacency) {
 geomlib_valence_stats geomlib_compute_valence_stats(
     const geomlib_trimesh *mesh
 ) {
-    geomlib_valence_stats stats;
+    geomlib_valence_stats stats = {0};
+    if (!mesh || !mesh->vertex_count) return stats;
 
-    geomlib_vertex_adjacency adjacency = geomlib_build_vertex_adjacency(mesh);
+    geomlib_edge_mesh edges = geomlib_build_edge_mesh(mesh);
+    if (!edges.vertex_edge_count) return stats;
 
-    stats.valences = (uint32_t*)malloc(mesh->vertex_count * sizeof(uint32_t));
+    stats.valences = edges.vertex_edge_count;
+    edges.vertex_edge_count = NULL;
+    geomlib_edge_mesh_free(&edges);
+
     stats.min_valence = UINT32_MAX;
-    stats.max_valence = 0;
-    uint32_t total_valence = 0;
-
-    /* Remove duplicates and count unique neighbors */
+    size_t total_valence = 0;
     for (size_t i = 0; i < mesh->vertex_count; i++) {
-        /* Use simple O(n²) duplicate removal for small neighborhoods */
-        uint32_t unique_count = 0;
-        for (uint32_t j = 0; j < adjacency.neighbor_counts[i]; j++) {
-            bool is_duplicate = false;
-            uint32_t neighbor = adjacency.neighbors[i][j];
-            for (uint32_t k = 0; k < j; k++) {
-                if (adjacency.neighbors[i][k] == neighbor) {
-                    is_duplicate = true;
-                    break;
-                }
-            }
-            if (!is_duplicate) {
-                unique_count++;
-            }
-        }
-
-        stats.valences[i] = unique_count;
-        if (unique_count < stats.min_valence) stats.min_valence = unique_count;
-        if (unique_count > stats.max_valence) stats.max_valence = unique_count;
-        total_valence += unique_count;
+        uint32_t count = stats.valences[i];
+        if (count < stats.min_valence) stats.min_valence = count;
+        if (count > stats.max_valence) stats.max_valence = count;
+        total_valence += count;
     }
-
     stats.avg_valence = (float)total_valence / (float)mesh->vertex_count;
 
-    /* Build histogram */
-    stats.histogram_size = stats.max_valence + 1;
-    stats.histogram = (uint32_t*)calloc(stats.histogram_size, sizeof(uint32_t));
-    for (size_t i = 0; i < mesh->vertex_count; i++) {
-        stats.histogram[stats.valences[i]]++;
+    stats.histogram = (uint32_t*)calloc((size_t)stats.max_valence + 1, sizeof(uint32_t));
+    if (stats.histogram) {
+        stats.histogram_size = (size_t)stats.max_valence + 1;
+        for (size_t i = 0; i < mesh->vertex_count; i++) stats.histogram[stats.valences[i]]++;
     }
-
-    geomlib_vertex_adjacency_free(&adjacency);
 
     return stats;
 }
@@ -716,203 +705,187 @@ void geomlib_valence_stats_free(geomlib_valence_stats *stats) {
  * ============================================================================ */
 
 /* Helper: Test if two triangles intersect (basic AABB and edge-triangle tests) */
-static bool triangles_intersect(
-    geomlib_vec3 a0, geomlib_vec3 a1, geomlib_vec3 a2,
-    geomlib_vec3 b0, geomlib_vec3 b1, geomlib_vec3 b2,
-    geomlib_vec3 *intersection_point
-) {
-    /* Compute AABBs */
-    geomlib_aabb aabb_a;
-    aabb_a.min = a0;
-    aabb_a.max = a0;
-    aabb_a.min.x = fminf(aabb_a.min.x, fminf(a1.x, a2.x));
-    aabb_a.min.y = fminf(aabb_a.min.y, fminf(a1.y, a2.y));
-    aabb_a.min.z = fminf(aabb_a.min.z, fminf(a1.z, a2.z));
-    aabb_a.max.x = fmaxf(aabb_a.max.x, fmaxf(a1.x, a2.x));
-    aabb_a.max.y = fmaxf(aabb_a.max.y, fmaxf(a1.y, a2.y));
-    aabb_a.max.z = fmaxf(aabb_a.max.z, fmaxf(a1.z, a2.z));
-
-    geomlib_aabb aabb_b;
-    aabb_b.min = b0;
-    aabb_b.max = b0;
-    aabb_b.min.x = fminf(aabb_b.min.x, fminf(b1.x, b2.x));
-    aabb_b.min.y = fminf(aabb_b.min.y, fminf(b1.y, b2.y));
-    aabb_b.min.z = fminf(aabb_b.min.z, fminf(b1.z, b2.z));
-    aabb_b.max.x = fmaxf(aabb_b.max.x, fmaxf(b1.x, b2.x));
-    aabb_b.max.y = fmaxf(aabb_b.max.y, fmaxf(b1.y, b2.y));
-    aabb_b.max.z = fmaxf(aabb_b.max.z, fmaxf(b1.z, b2.z));
-
-    /* Quick AABB overlap test */
-    if (!geomlib_aabb_intersects(aabb_a, aabb_b)) {
-        return false;
+static geomlib_aabb triangle_bounds(const geomlib_vec3 triangle[3]) {
+    geomlib_aabb bounds = {triangle[0], triangle[0]};
+    for (int i = 1; i < 3; i++) {
+        geomlib_vec3 p = triangle[i];
+        bounds.min.x = fminf(bounds.min.x, p.x);
+        bounds.min.y = fminf(bounds.min.y, p.y);
+        bounds.min.z = fminf(bounds.min.z, p.z);
+        bounds.max.x = fmaxf(bounds.max.x, p.x);
+        bounds.max.y = fmaxf(bounds.max.y, p.y);
+        bounds.max.z = fmaxf(bounds.max.z, p.z);
     }
+    return bounds;
+}
 
-    /* Compute normals */
-    geomlib_vec3 ea1 = geomlib_vec3_sub(a1, a0);
-    geomlib_vec3 ea2 = geomlib_vec3_sub(a2, a0);
-    geomlib_vec3 na = geomlib_vec3_normalize(geomlib_vec3_cross(ea1, ea2));
+static float triangle_half_plane(geomlib_vec3 a, geomlib_vec3 b,
+                                 geomlib_vec3 normal, geomlib_vec3 point) {
+    geomlib_vec3 edge = geomlib_vec3_sub(b, a);
+    geomlib_vec3 inward = geomlib_vec3_normalize(geomlib_vec3_cross(normal, edge));
+    return geomlib_vec3_dot(inward, geomlib_vec3_sub(point, a));
+}
 
-    geomlib_vec3 eb1 = geomlib_vec3_sub(b1, b0);
-    geomlib_vec3 eb2 = geomlib_vec3_sub(b2, b0);
-    geomlib_vec3 nb = geomlib_vec3_normalize(geomlib_vec3_cross(eb1, eb2));
-
-    /* Compute signed distances of triangle B vertices to plane of triangle A */
-    float da = geomlib_vec3_dot(na, a0);
-    float db0 = geomlib_vec3_dot(na, b0) - da;
-    float db1 = geomlib_vec3_dot(na, b1) - da;
-    float db2 = geomlib_vec3_dot(na, b2) - da;
-
-    /* If all vertices on same side, no intersection */
-    if ((db0 > 0 && db1 > 0 && db2 > 0) || (db0 < 0 && db1 < 0 && db2 < 0)) {
-        return false;
+/* Clip a segment against the plane and inward half-planes of a triangle. */
+static bool clip_segment_to_triangle(geomlib_vec3 a, geomlib_vec3 b,
+                                     const geomlib_vec3 triangle[3], geomlib_vec3 normal,
+                                     float tolerance, float *first, float *last) {
+    float da = geomlib_vec3_dot(normal, geomlib_vec3_sub(a, triangle[0]));
+    float db = geomlib_vec3_dot(normal, geomlib_vec3_sub(b, triangle[0]));
+    *first = 0.0f;
+    *last = 1.0f;
+    if (fabsf(da) > tolerance || fabsf(db) > tolerance) {
+        if ((da > tolerance && db > tolerance) || (da < -tolerance && db < -tolerance))
+            return false;
+        *first = *last = fmaxf(0.0f, fminf(1.0f, da / (da - db)));
     }
-
-    /* Compute signed distances of triangle A vertices to plane of triangle B */
-    float db = geomlib_vec3_dot(nb, b0);
-    float da0 = geomlib_vec3_dot(nb, a0) - db;
-    float da1 = geomlib_vec3_dot(nb, a1) - db;
-    float da2 = geomlib_vec3_dot(nb, a2) - db;
-
-    /* If all vertices on same side, no intersection */
-    if ((da0 > 0 && da1 > 0 && da2 > 0) || (da0 < 0 && da1 < 0 && da2 < 0)) {
-        return false;
+    for (int i = 0; i < 3; i++) {
+        geomlib_vec3 p = triangle[i], q = triangle[(i + 1) % 3];
+        float start = triangle_half_plane(p, q, normal, a);
+        float end = triangle_half_plane(p, q, normal, b);
+        if (start < -tolerance && end < -tolerance) return false;
+        if (start < -tolerance) *first = fmaxf(*first, (start + tolerance) / (start - end));
+        if (end < -tolerance) *last = fminf(*last, (start + tolerance) / (start - end));
+        if (*first > *last) return false;
     }
-
-    /* Triangles likely intersect - compute approximate intersection point */
-    *intersection_point = geomlib_vec3_mul(geomlib_vec3_add(
-        geomlib_vec3_add(a0, a1),
-        geomlib_vec3_add(a2, geomlib_vec3_add(geomlib_vec3_add(b0, b1), b2))
-    ), 1.0f / 6.0f);
-
     return true;
 }
 
-geomlib_self_intersection geomlib_detect_self_intersections(
-    const geomlib_trimesh *mesh
-) {
-    geomlib_self_intersection result;
-    result.has_intersections = false;
-    result.pairs = NULL;
-    result.pair_count = 0;
+static bool on_shared_vertex(geomlib_vec3 point, const geomlib_vec3 shared[2],
+                             int shared_count, float tolerance) {
+    if (!shared_count) return false;
+    geomlib_vec3 offset = geomlib_vec3_sub(point, shared[0]);
+    return geomlib_vec3_length(offset) <= tolerance;
+}
 
-    if (!mesh || mesh->triangle_count == 0) {
-        return result;
+static bool triangles_intersect(const geomlib_trimesh *mesh, uint32_t face_a, uint32_t face_b,
+                                const geomlib_vec3 a[3], const geomlib_vec3 b[3],
+                                float tolerance, geomlib_vec3 *point) {
+    const geomlib_vec3 *triangles[2] = {a, b};
+    geomlib_vec3 normals[2];
+    for (int i = 0; i < 2; i++) {
+        const geomlib_vec3 *triangle = triangles[i];
+        geomlib_vec3 u = geomlib_vec3_sub(triangle[1], triangle[0]);
+        geomlib_vec3 v = geomlib_vec3_sub(triangle[2], triangle[0]);
+        geomlib_vec3 normal = geomlib_vec3_cross(u, v);
+        float length = geomlib_vec3_length(normal);
+        if (!(length > 0.0f)) return false;
+        normals[i] = geomlib_vec3_mul(normal, 1.0f / length);
     }
 
-    /* Build BVH for efficient queries */
-    geomlib_bvh bvh;
-    if (geomlib_bvh_build(&bvh, mesh, GEOMLIB_BVH_QUALITY_MEDIUM) != GEOMLIB_MESH_SUCCESS) {
-        return result;  /* Failed to build BVH */
-    }
-
-    /* Allocate space for intersection pairs */
-    size_t max_pairs = mesh->triangle_count * 8;  /* Conservative estimate */
-    geomlib_intersection_pair *temp_pairs = (geomlib_intersection_pair*)malloc(
-        max_pairs * sizeof(geomlib_intersection_pair));
-    size_t pair_count = 0;
-
-    /* Precompute triangle AABBs for faster queries */
-    geomlib_aabb *tri_aabbs = (geomlib_aabb*)malloc(mesh->triangle_count * sizeof(geomlib_aabb));
-    geomlib_vec3 *tri_centers = (geomlib_vec3*)malloc(mesh->triangle_count * sizeof(geomlib_vec3));
-
-    for (size_t i = 0; i < mesh->triangle_count; i++) {
-        geomlib_vec3 v0 = mesh->vertices[mesh->indices[i * 3 + 0]];
-        geomlib_vec3 v1 = mesh->vertices[mesh->indices[i * 3 + 1]];
-        geomlib_vec3 v2 = mesh->vertices[mesh->indices[i * 3 + 2]];
-
-        tri_aabbs[i].min = v0;
-        tri_aabbs[i].max = v0;
-        tri_aabbs[i].min.x = fminf(tri_aabbs[i].min.x, fminf(v1.x, v2.x));
-        tri_aabbs[i].min.y = fminf(tri_aabbs[i].min.y, fminf(v1.y, v2.y));
-        tri_aabbs[i].min.z = fminf(tri_aabbs[i].min.z, fminf(v1.z, v2.z));
-        tri_aabbs[i].max.x = fmaxf(tri_aabbs[i].max.x, fmaxf(v1.x, v2.x));
-        tri_aabbs[i].max.y = fmaxf(tri_aabbs[i].max.y, fmaxf(v1.y, v2.y));
-        tri_aabbs[i].max.z = fmaxf(tri_aabbs[i].max.z, fmaxf(v1.z, v2.z));
-
-        tri_centers[i] = geomlib_vec3_mul(geomlib_vec3_add(
-            geomlib_vec3_add(v0, v1), v2), 1.0f / 3.0f);
-    }
-
-    /* Use BVH for spatial queries - check each triangle against nearby candidates */
-    for (size_t i = 0; i < mesh->triangle_count; i++) {
-        geomlib_vec3 a0 = mesh->vertices[mesh->indices[i * 3 + 0]];
-        geomlib_vec3 a1 = mesh->vertices[mesh->indices[i * 3 + 1]];
-        geomlib_vec3 a2 = mesh->vertices[mesh->indices[i * 3 + 2]];
-
-        /* Compute search radius from AABB diagonal */
-        geomlib_vec3 aabb_size = geomlib_vec3_sub(tri_aabbs[i].max, tri_aabbs[i].min);
-        float search_radius = geomlib_vec3_length(aabb_size) * 1.5f;  /* Include some margin */
-
-        /* Query BVH for nearby triangles using radius search */
-        uint32_t candidates[256];  /* Stack buffer for candidates */
-        geomlib_vec3 points_buf[256];
-        float dists_buf[256];
-        size_t candidate_count = geomlib_bvh_radius_query(
-            &bvh, tri_centers[i], search_radius, 256,
-            points_buf, dists_buf, candidates);
-
-        /* Test against candidates */
-        for (size_t c = 0; c < candidate_count; c++) {
-            size_t j = candidates[c];
-
-            /* Skip self and already-tested pairs */
-            if (j <= i) continue;
-
-            /* Quick AABB overlap test */
-            if (!geomlib_aabb_intersects(tri_aabbs[i], tri_aabbs[j])) {
-                continue;
+    geomlib_vec3 shared[2];
+    int shared_count = 0;
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            if (mesh->indices[face_a * 3 + i] != mesh->indices[face_b * 3 + j]) continue;
+            if (shared_count == 2) {
+                *point = a[0];  /* Duplicate triangles overlap across their full area. */
+                return true;
             }
-
-            geomlib_vec3 b0 = mesh->vertices[mesh->indices[j * 3 + 0]];
-            geomlib_vec3 b1 = mesh->vertices[mesh->indices[j * 3 + 1]];
-            geomlib_vec3 b2 = mesh->vertices[mesh->indices[j * 3 + 2]];
-
-            /* Skip adjacent triangles (share vertices) */
-            uint32_t ai0 = mesh->indices[i * 3 + 0];
-            uint32_t ai1 = mesh->indices[i * 3 + 1];
-            uint32_t ai2 = mesh->indices[i * 3 + 2];
-            uint32_t bi0 = mesh->indices[j * 3 + 0];
-            uint32_t bi1 = mesh->indices[j * 3 + 1];
-            uint32_t bi2 = mesh->indices[j * 3 + 2];
-
-            if (ai0 == bi0 || ai0 == bi1 || ai0 == bi2 ||
-                ai1 == bi0 || ai1 == bi1 || ai1 == bi2 ||
-                ai2 == bi0 || ai2 == bi1 || ai2 == bi2) {
-                continue;  /* Adjacent triangles */
-            }
-
-            /* Full triangle-triangle intersection test */
-            geomlib_vec3 intersection_point;
-            if (triangles_intersect(a0, a1, a2, b0, b1, b2, &intersection_point)) {
-                if (pair_count >= max_pairs) {
-                    /* Grow array if needed */
-                    max_pairs *= 2;
-                    temp_pairs = (geomlib_intersection_pair*)realloc(temp_pairs,
-                        max_pairs * sizeof(geomlib_intersection_pair));
-                }
-                temp_pairs[pair_count].face0 = (uint32_t)i;
-                temp_pairs[pair_count].face1 = (uint32_t)j;
-                temp_pairs[pair_count].point = intersection_point;
-                pair_count++;
-                result.has_intersections = true;
-            }
+            shared[shared_count++] = a[i];
+            break;
         }
     }
 
-    free(tri_aabbs);
-    free(tri_centers);
-
-    geomlib_bvh_free(&bvh);
-
-    /* Shrink array to actual size */
-    if (pair_count > 0) {
-        result.pairs = (geomlib_intersection_pair*)realloc(temp_pairs,
-            pair_count * sizeof(geomlib_intersection_pair));
-        result.pair_count = pair_count;
-    } else {
-        free(temp_pairs);
+    if (shared_count == 2) {
+        geomlib_vec3 edge = geomlib_vec3_sub(shared[1], shared[0]);
+        geomlib_vec3 other[2] = {{0, 0, 0}, {0, 0, 0}};
+        for (int side = 0; side < 2; side++) {
+            for (int i = 0; i < 3; i++) {
+                geomlib_vec3 offset = geomlib_vec3_sub(triangles[side][i], shared[0]);
+                geomlib_vec3 perpendicular = geomlib_vec3_cross(edge, offset);
+                if (geomlib_vec3_length(perpendicular) > geomlib_vec3_length(other[side]))
+                    other[side] = perpendicular;
+            }
+        }
+        if (geomlib_vec3_length(geomlib_vec3_cross(normals[0], normals[1])) > 1e-6f ||
+            geomlib_vec3_dot(other[0], other[1]) <= 0.0f) return false;
+        *point = shared[0];
+        return true;
     }
 
+    for (int side = 0; side < 2; side++) {
+        const geomlib_vec3 *source = triangles[side], *target = triangles[1 - side];
+        for (int i = 0; i < 3; i++) {
+            geomlib_vec3 start = source[i], end = source[(i + 1) % 3];
+            float first, last;
+            if (!clip_segment_to_triangle(start, end, target, normals[1 - side],
+                                          tolerance, &first, &last)) continue;
+            geomlib_vec3 edge = geomlib_vec3_sub(end, start);
+            geomlib_vec3 points[2] = {geomlib_vec3_add(start, geomlib_vec3_mul(edge, first)),
+                                      geomlib_vec3_add(start, geomlib_vec3_mul(edge, last))};
+            for (int j = 0; j < 2; j++) {
+                if (on_shared_vertex(points[j], shared, shared_count, tolerance * 4.0f)) continue;
+                *point = points[j];
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+static bool collect_intersections(const geomlib_bvh *bvh, uint32_t node_index,
+                                  uint32_t face, const geomlib_vec3 triangle[3],
+                                  geomlib_aabb bounds, geomlib_self_intersection *result,
+                                  size_t *capacity) {
+    const geomlib_bvh_node *node = &bvh->nodes[node_index];
+    if (!geomlib_aabb_intersects(bounds, node->bounds)) return true;
+    if (!node->is_leaf) {
+        return collect_intersections(bvh, node->data.interior.left_child, face, triangle,
+                                     bounds, result, capacity) &&
+               collect_intersections(bvh, node->data.interior.right_child, face, triangle,
+                                     bounds, result, capacity);
+    }
+
+    for (uint32_t i = 0; i < node->data.leaf.primitive_count; i++) {
+        uint32_t other = bvh->primitive_indices[node->data.leaf.primitive_offset + i];
+        if (other <= face) continue;
+        geomlib_vec3 vertices[3];
+        geomlib_trimesh_get_triangle_vertices(bvh->mesh, other, &vertices[0], &vertices[1], &vertices[2]);
+        geomlib_aabb other_bounds = triangle_bounds(vertices);
+        if (!geomlib_aabb_intersects(bounds, other_bounds)) continue;
+        float scale = fminf(geomlib_vec3_length(geomlib_vec3_sub(bounds.max, bounds.min)),
+                            geomlib_vec3_length(geomlib_vec3_sub(other_bounds.max, other_bounds.min)));
+        geomlib_vec3 point;
+        if (!triangles_intersect(bvh->mesh, face, other, triangle, vertices, scale * 1e-6f, &point))
+            continue;
+        if (result->pair_count == *capacity) {
+            size_t next = *capacity ? *capacity * 2 : 16;
+            if (next <= *capacity || next > SIZE_MAX / sizeof(*result->pairs)) return false;
+            geomlib_intersection_pair *pairs = (geomlib_intersection_pair*)realloc(
+                result->pairs, next * sizeof(*pairs));
+            if (!pairs) return false;
+            result->pairs = pairs;
+            *capacity = next;
+        }
+        result->pairs[result->pair_count++] = (geomlib_intersection_pair){face, other, point};
+    }
+    return true;
+}
+
+geomlib_self_intersection geomlib_detect_self_intersections(const geomlib_trimesh *mesh) {
+    geomlib_self_intersection result = {0};
+    if (!mesh || !mesh->triangle_count || mesh->triangle_count > UINT32_MAX / 3 ||
+        !mesh->vertices || !mesh->indices) return result;
+    for (size_t i = 0; i < mesh->triangle_count * 3; i++) {
+        if (mesh->indices[i] >= mesh->vertex_count) return result;
+    }
+    geomlib_bvh bvh;
+    if (geomlib_bvh_build(&bvh, mesh, GEOMLIB_BVH_QUALITY_MEDIUM) != GEOMLIB_MESH_SUCCESS)
+        return result;
+
+    size_t capacity = 0;
+    for (uint32_t i = 0; i < mesh->triangle_count; i++) {
+        geomlib_vec3 triangle[3];
+        geomlib_trimesh_get_triangle_vertices(mesh, i, &triangle[0], &triangle[1], &triangle[2]);
+        if (!collect_intersections(&bvh, 0, i, triangle, triangle_bounds(triangle), &result, &capacity)) {
+            geomlib_self_intersection_free(&result);
+            result = (geomlib_self_intersection){0};
+            break;
+        }
+    }
+    result.has_intersections = result.pair_count != 0;
+    geomlib_bvh_free(&bvh);
     return result;
 }
 
@@ -924,51 +897,24 @@ void geomlib_self_intersection_free(geomlib_self_intersection *result) {
  * Face Adjacency
  * ============================================================================ */
 
-geomlib_face_adjacency geomlib_build_face_adjacency(
-    const geomlib_trimesh *mesh
-) {
-    geomlib_face_adjacency adjacency;
-    adjacency.neighbors = (uint32_t*)malloc(mesh->triangle_count * 3 * sizeof(uint32_t));
-
-    /* Initialize to boundary */
-    for (size_t i = 0; i < mesh->triangle_count * 3; i++) {
-        adjacency.neighbors[i] = UINT32_MAX;
-    }
-
-    /* Build edge map */
-    edge_hash_map map = edge_hash_map_create(mesh->triangle_count * 3);
-
-    for (size_t i = 0; i < mesh->triangle_count; i++) {
-        for (int j = 0; j < 3; j++) {
-            uint32_t v0 = mesh->indices[i * 3 + j];
-            uint32_t v1 = mesh->indices[i * 3 + ((j + 1) % 3)];
-            edge_key key = make_edge_key(v0, v1);
-
-            edge_hash_entry *entry = edge_hash_map_insert(&map, key);
-            if (entry->face_count < 2) {
-                entry->faces[entry->face_count++] = (uint32_t)i;
+geomlib_face_adjacency geomlib_build_face_adjacency(const geomlib_trimesh *mesh) {
+    geomlib_face_adjacency result = {0};
+    edge_hash_map map = {0};
+    if (build_edge_map(mesh, &map, NULL, NULL) && mesh->triangle_count) {
+        size_t count = mesh->triangle_count * 3;
+        result.neighbors = (uint32_t*)malloc(count * sizeof(uint32_t));
+        if (result.neighbors) {
+            for (size_t i = 0; i < count; i++) {
+                size_t next = i % 3 == 2 ? i - 2 : i + 1;
+                edge_key key = make_edge_key(mesh->indices[i], mesh->indices[next]);
+                edge_hash_entry *edge = edge_hash_map_find(&map, key);
+                result.neighbors[i] = edge->face_count == 2
+                    ? edge->faces[edge->faces[0] == i / 3] : UINT32_MAX;
             }
         }
     }
-
-    /* Fill adjacency */
-    for (size_t i = 0; i < mesh->triangle_count; i++) {
-        for (int j = 0; j < 3; j++) {
-            uint32_t v0 = mesh->indices[i * 3 + j];
-            uint32_t v1 = mesh->indices[i * 3 + ((j + 1) % 3)];
-            edge_key key = make_edge_key(v0, v1);
-
-            edge_hash_entry *entry = edge_hash_map_find(&map, key);
-            if (entry && entry->face_count == 2) {
-                uint32_t other = (entry->faces[0] == i) ? entry->faces[1] : entry->faces[0];
-                adjacency.neighbors[i * 3 + j] = other;
-            }
-        }
-    }
-
     edge_hash_map_free(&map);
-
-    return adjacency;
+    return result;
 }
 
 void geomlib_face_adjacency_free(geomlib_face_adjacency *adjacency) {
@@ -976,7 +922,7 @@ void geomlib_face_adjacency_free(geomlib_face_adjacency *adjacency) {
 }
 
 /* ============================================================================
- * Topological Operations (Stubs)
+ * Topological Operations
  * ============================================================================ */
 
 int geomlib_remove_isolated_vertices(geomlib_trimesh *mesh) {
@@ -1135,318 +1081,114 @@ int geomlib_remove_duplicate_faces(geomlib_trimesh *mesh) {
 }
 
 int geomlib_split_nonmanifold_vertices(geomlib_trimesh *mesh) {
-    if (!mesh || mesh->vertex_count == 0 || mesh->triangle_count == 0) {
-        return GEOMLIB_MESH_SUCCESS;
-    }
+    if (!mesh || !mesh->vertex_count || !mesh->triangle_count) return 0;
+    edge_hash_map map = {0};
+    uint32_t *fans = build_corner_fans(mesh, &map);
+    edge_hash_map_free(&map);
+    if (!fans) return -GEOMLIB_MESH_ERROR_MEMORY;
 
-    /* Build vertex adjacency to find which triangles use each vertex */
-    geomlib_vertex_adjacency adj = geomlib_build_vertex_adjacency(mesh);
+    size_t original_count = mesh->vertex_count;
+    size_t corner_count = mesh->triangle_count * 3;
+    uint32_t *remap = (uint32_t*)malloc(corner_count * sizeof(uint32_t));
+    bool *has_fan = (bool*)calloc(original_count, sizeof(bool));
+    int result = -GEOMLIB_MESH_ERROR_MEMORY;
+    if (!remap || !has_fan) goto finish;
 
-    int splits = 0;
-
-    /* Process each vertex */
-    for (size_t v = 0; v < mesh->vertex_count; v++) {
-        uint32_t tri_count = adj.face_counts[v];
-
-        if (tri_count < 2) continue;  /* Can't be nonmanifold with 0 or 1 triangles */
-
-        /* Check if triangles form a connected fan around vertex */
-        /* Track which triangles have been visited */
-        bool *visited = (bool*)calloc(tri_count, sizeof(bool));
-        uint32_t *components = (uint32_t*)malloc(tri_count * sizeof(uint32_t));
-        uint32_t component_count = 0;
-
-        /* Find connected components using triangle adjacency */
-        for (uint32_t i = 0; i < tri_count; i++) {
-            if (visited[i]) continue;
-
-            /* Start new component */
-            components[component_count] = 1;
-            visited[i] = true;
-
-            /* BFS to find connected triangles sharing edges */
-            uint32_t queue[256];  /* Stack buffer */
-            uint32_t queue_head = 0, queue_tail = 0;
-            queue[queue_tail++] = i;
-
-            while (queue_head < queue_tail && queue_tail < 256) {
-                uint32_t curr_local = queue[queue_head++];
-                uint32_t curr_tri = adj.faces[v][curr_local];
-
-                /* Find neighbors (triangles sharing an edge with current) */
-                for (uint32_t j = 0; j < tri_count; j++) {
-                    if (visited[j]) continue;
-
-                    uint32_t other_tri = adj.faces[v][j];
-
-                    /* Check if they share an edge (have 2 common vertices) */
-                    int common = 0;
-                    for (int ti = 0; ti < 3; ti++) {
-                        uint32_t tv = mesh->indices[curr_tri * 3 + ti];
-                        for (int oi = 0; oi < 3; oi++) {
-                            uint32_t ov = mesh->indices[other_tri * 3 + oi];
-                            if (tv == ov) common++;
-                        }
-                    }
-
-                    if (common >= 2) {
-                        /* Connected - add to component */
-                        visited[j] = true;
-                        components[component_count]++;
-                        if (queue_tail < 256) {
-                            queue[queue_tail++] = j;
-                        }
-                    }
-                }
-            }
-
-            component_count++;
+    size_t new_count = original_count;
+    for (size_t i = 0; i < corner_count; i++) {
+        if (fans[i] != i) continue;
+        uint32_t vertex = mesh->indices[i];
+        if (!has_fan[vertex]) {
+            remap[i] = vertex;
+            has_fan[vertex] = true;
+        } else {
+            if (new_count >= UINT32_MAX || new_count - original_count >= INT_MAX) goto finish;
+            remap[i] = (uint32_t)new_count++;
         }
-
-        /* If more than one component, vertex is nonmanifold - split it */
-        if (component_count > 1) {
-            /* For each component after the first, create a new vertex */
-            visited[0] = false;  /* Reuse visited array to mark components */
-            memset(visited, 0, tri_count * sizeof(bool));
-
-            uint32_t comp_idx = 0;
-            for (uint32_t i = 0; i < tri_count; i++) {
-                if (visited[i]) continue;
-
-                /* First component uses original vertex */
-                if (comp_idx == 0) {
-                    comp_idx++;
-                    continue;
-                }
-
-                /* Create new vertex (duplicate) */
-                uint32_t new_v = mesh->vertex_count;
-                geomlib_vec3 pos = mesh->vertices[v];
-                geomlib_vec3 *normal = mesh->normals ? &mesh->normals[v] : NULL;
-                geomlib_vec2 *texcoord = mesh->texcoords ? &mesh->texcoords[v] : NULL;
-
-                /* Add vertex manually (add_vertex uses vec3 for texcoords) */
-                if (mesh->vertex_count >= mesh->vertex_capacity) {
-                    /* Grow arrays */
-                    size_t new_cap = mesh->vertex_capacity * 2;
-                    mesh->vertices = (geomlib_vec3*)realloc(mesh->vertices, new_cap * sizeof(geomlib_vec3));
-                    if (mesh->normals) {
-                        mesh->normals = (geomlib_vec3*)realloc(mesh->normals, new_cap * sizeof(geomlib_vec3));
-                    }
-                    if (mesh->texcoords) {
-                        mesh->texcoords = (geomlib_vec2*)realloc(mesh->texcoords, new_cap * sizeof(geomlib_vec2));
-                    }
-                    mesh->vertex_capacity = new_cap;
-                }
-                mesh->vertices[new_v] = pos;
-                if (mesh->normals && normal) {
-                    mesh->normals[new_v] = *normal;
-                }
-                if (mesh->texcoords && texcoord) {
-                    mesh->texcoords[new_v] = *texcoord;
-                }
-                mesh->vertex_count++;
-
-                /* Update all triangles in this component to use new vertex */
-                for (uint32_t j = 0; j < tri_count; j++) {
-                    uint32_t tri = adj.faces[v][j];
-                    for (int k = 0; k < 3; k++) {
-                        if (mesh->indices[tri * 3 + k] == v) {
-                            mesh->indices[tri * 3 + k] = new_v;
-                            visited[j] = true;
-                            break;
-                        }
-                    }
-                }
-
-                splits++;
-                comp_idx++;
-            }
-        }
-
-        free(visited);
-        free(components);
     }
+    if (new_count > SIZE_MAX / sizeof(geomlib_vec3)) goto finish;
+    if (geomlib_trimesh_reserve_vertices(mesh, new_count) != GEOMLIB_MESH_SUCCESS) goto finish;
+    for (size_t i = 0; i < corner_count; i++) {
+        if (fans[i] != i || remap[i] < original_count) continue;
+        uint32_t from = mesh->indices[i], to = remap[i];
+        mesh->vertices[to] = mesh->vertices[from];
+        if (mesh->normals) mesh->normals[to] = mesh->normals[from];
+        if (mesh->texcoords) mesh->texcoords[to] = mesh->texcoords[from];
+    }
+    for (size_t i = 0; i < corner_count; i++) mesh->indices[i] = remap[fans[i]];
+    mesh->vertex_count = new_count;
+    result = (int)(new_count - original_count);
 
-    geomlib_vertex_adjacency_free(&adj);
-
-    return splits;  /* Return number of split vertices */
+finish:
+    free(fans);
+    free(remap);
+    free(has_fan);
+    return result;
 }
 
 bool geomlib_is_consistently_oriented(const geomlib_trimesh *mesh) {
-    if (!mesh || mesh->triangle_count == 0) {
-        return true;
-    }
-
-    /* Build edge mesh to check orientation consistency */
-    geomlib_edge_mesh edges = geomlib_build_edge_mesh(mesh);
-
-    bool is_consistent = true;
-
-    /* Check each edge - if it has 2 adjacent faces, they should have opposite orientations */
-    for (size_t i = 0; i < edges.edge_count; i++) {
-        if (edges.edges[i].face1 == UINT32_MAX) {
-            continue;  /* Boundary edge */
-        }
-
-        uint32_t v0 = edges.edges[i].v0;
-        uint32_t v1 = edges.edges[i].v1;
-        uint32_t f0 = edges.edges[i].face0;
-        uint32_t f1 = edges.edges[i].face1;
-
-        /* Find edge in face0 */
-        bool f0_forward = false;
-        for (int j = 0; j < 3; j++) {
-            uint32_t a = mesh->indices[f0 * 3 + j];
-            uint32_t b = mesh->indices[f0 * 3 + ((j + 1) % 3)];
-            if ((a == v0 && b == v1)) {
-                f0_forward = true;
+    if (!mesh || !mesh->triangle_count) return true;
+    edge_hash_map map = {0};
+    bool consistent = build_edge_map(mesh, &map, NULL, NULL);
+    for (size_t i = 0; consistent && i < map.bucket_count; i++) {
+        for (edge_hash_entry *edge = map.buckets[i]; edge; edge = edge->next) {
+            if (edge->face_count > 2 || (edge->face_count == 2 && edge->forward_count != 1)) {
+                consistent = false;
                 break;
             }
         }
-
-        /* Find edge in face1 */
-        bool f1_forward = false;
-        for (int j = 0; j < 3; j++) {
-            uint32_t a = mesh->indices[f1 * 3 + j];
-            uint32_t b = mesh->indices[f1 * 3 + ((j + 1) % 3)];
-            if ((a == v0 && b == v1)) {
-                f1_forward = true;
-                break;
-            }
-        }
-
-        /* Edges should have opposite orientations */
-        if (f0_forward == f1_forward) {
-            is_consistent = false;
-            break;
-        }
     }
-
-    geomlib_edge_mesh_free(&edges);
-
-    return is_consistent;
+    edge_hash_map_free(&map);
+    return consistent;
 }
 
 int geomlib_orient_consistently(geomlib_trimesh *mesh) {
-    if (!mesh || mesh->triangle_count == 0) {
-        return GEOMLIB_MESH_ERROR_INVALID;
-    }
-
-    /* Build face adjacency */
-    geomlib_edge_mesh edges = geomlib_build_edge_mesh(mesh);
-
-    /* Track which faces have been oriented */
-    bool *oriented = (bool*)calloc(mesh->triangle_count, sizeof(bool));
-    bool *flipped = (bool*)calloc(mesh->triangle_count, sizeof(bool));
-
-    if (!oriented || !flipped) {
-        free(oriented);
-        free(flipped);
-        geomlib_edge_mesh_free(&edges);
-        return GEOMLIB_MESH_ERROR_MEMORY;
-    }
-
-    /* BFS to propagate orientation */
+    if (!mesh || !mesh->triangle_count) return GEOMLIB_MESH_ERROR_INVALID;
+    edge_hash_map map = {0};
+    uint8_t *orientation = (uint8_t*)calloc(mesh->triangle_count, sizeof(uint8_t));
     uint32_t *queue = (uint32_t*)malloc(mesh->triangle_count * sizeof(uint32_t));
-    if (!queue) {
-        free(oriented);
-        free(flipped);
-        geomlib_edge_mesh_free(&edges);
-        return GEOMLIB_MESH_ERROR_MEMORY;
-    }
+    int result = GEOMLIB_MESH_ERROR_MEMORY;
+    if (!orientation || !queue || !build_edge_map(mesh, &map, NULL, NULL)) goto finish;
 
-    /* Process each connected component */
+    result = GEOMLIB_MESH_ERROR_INVALID;
     for (size_t seed = 0; seed < mesh->triangle_count; seed++) {
-        if (oriented[seed]) continue;
-
-        /* Start BFS from this seed */
-        size_t queue_head = 0;
-        size_t queue_tail = 0;
-
-        queue[queue_tail++] = (uint32_t)seed;
-        oriented[seed] = true;
-        flipped[seed] = false;
-
-        while (queue_head < queue_tail) {
-            uint32_t current = queue[queue_head++];
-
-            /* Find adjacent faces via edges */
-            for (size_t i = 0; i < edges.edge_count; i++) {
-                uint32_t f0 = edges.edges[i].face0;
-                uint32_t f1 = edges.edges[i].face1;
-
-                if (f1 == UINT32_MAX) continue;  /* Boundary */
-
-                uint32_t neighbor = UINT32_MAX;
-                if (f0 == current && !oriented[f1]) {
-                    neighbor = f1;
-                } else if (f1 == current && !oriented[f0]) {
-                    neighbor = f0;
+        if (orientation[seed]) continue;
+        size_t front = 0, end = 0;
+        queue[end++] = (uint32_t)seed;
+        orientation[seed] = 1;
+        while (front < end) {
+            uint32_t face = queue[front++];
+            for (int i = 0; i < 3; i++) {
+                uint32_t a = mesh->indices[face * 3 + i];
+                uint32_t b = mesh->indices[face * 3 + (i + 1) % 3];
+                edge_hash_entry *edge = edge_hash_map_find(&map, make_edge_key(a, b));
+                if (edge->face_count == 1) continue;
+                if (edge->face_count > 2) goto finish;
+                uint32_t neighbor = edge->faces[edge->faces[0] == face];
+                uint8_t required = edge->forward_count == 1 ? orientation[face] : 3 - orientation[face];
+                if (!orientation[neighbor]) {
+                    orientation[neighbor] = required;
+                    queue[end++] = neighbor;
+                } else if (orientation[neighbor] != required) {
+                    goto finish;
                 }
-
-                if (neighbor == UINT32_MAX) continue;
-
-                /* Check edge orientation between current and neighbor */
-                uint32_t v0 = edges.edges[i].v0;
-                uint32_t v1 = edges.edges[i].v1;
-
-                /* Find edge direction in current face */
-                bool current_forward = false;
-                for (int j = 0; j < 3; j++) {
-                    uint32_t a = mesh->indices[current * 3 + j];
-                    uint32_t b = mesh->indices[current * 3 + ((j + 1) % 3)];
-                    if (a == v0 && b == v1) {
-                        current_forward = true;
-                        break;
-                    } else if (a == v1 && b == v0) {
-                        current_forward = false;
-                        break;
-                    }
-                }
-
-                /* Find edge direction in neighbor face */
-                bool neighbor_forward = false;
-                for (int j = 0; j < 3; j++) {
-                    uint32_t a = mesh->indices[neighbor * 3 + j];
-                    uint32_t b = mesh->indices[neighbor * 3 + ((j + 1) % 3)];
-                    if (a == v0 && b == v1) {
-                        neighbor_forward = true;
-                        break;
-                    } else if (a == v1 && b == v0) {
-                        neighbor_forward = false;
-                        break;
-                    }
-                }
-
-                /* If orientations match, neighbor needs to be flipped */
-                oriented[neighbor] = true;
-                if (current_forward == neighbor_forward) {
-                    flipped[neighbor] = !flipped[current];
-                } else {
-                    flipped[neighbor] = flipped[current];
-                }
-
-                queue[queue_tail++] = neighbor;
             }
         }
     }
 
-    /* Apply flips */
     for (size_t i = 0; i < mesh->triangle_count; i++) {
-        if (flipped[i]) {
-            uint32_t temp = mesh->indices[i * 3 + 1];
-            mesh->indices[i * 3 + 1] = mesh->indices[i * 3 + 2];
-            mesh->indices[i * 3 + 2] = temp;
-        }
+        if (orientation[i] != 2) continue;
+        uint32_t temp = mesh->indices[i * 3 + 1];
+        mesh->indices[i * 3 + 1] = mesh->indices[i * 3 + 2];
+        mesh->indices[i * 3 + 2] = temp;
     }
+    result = GEOMLIB_MESH_SUCCESS;
 
-    free(oriented);
-    free(flipped);
+finish:
+    free(orientation);
     free(queue);
-    geomlib_edge_mesh_free(&edges);
-
-    return GEOMLIB_MESH_SUCCESS;
+    edge_hash_map_free(&map);
+    return result;
 }
 
 int geomlib_reverse_orientation(geomlib_trimesh *mesh) {

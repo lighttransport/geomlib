@@ -26,8 +26,8 @@ typedef enum geomlib_subdivision_scheme {
 typedef struct geomlib_subdivision_params {
     geomlib_subdivision_scheme scheme;
     int levels;                    /* Number of subdivision levels */
-    bool preserve_boundaries;      /* Keep boundary vertices fixed */
-    bool project_to_limit;        /* Project to limit surface (smoother) */
+    bool preserve_boundaries;      /* Loop: freeze boundary vertices */
+    bool project_to_limit;         /* Loop: project interior vertices to the limit surface */
 } geomlib_subdivision_params;
 
 /* Default subdivision parameters */
@@ -54,10 +54,11 @@ int geomlib_subdivide_loop(
     geomlib_trimesh *output
 );
 
-/* Butterfly subdivision (one level)
- * Interpolating subdivision scheme
- * Passes through original vertices
- */
+/* Modified Butterfly subdivision (Zorin et al.), one level. Interpolating:
+ * control vertices are unchanged. Regular edges use the 8-point stencil
+ * 1/2(a+b) + 1/8(c+d) - 1/16(sum of four outer vertices); edges touching an
+ * extraordinary vertex use Zorin's extraordinary masks, and boundary edges use
+ * the linear midpoint. */
 int geomlib_subdivide_butterfly(
     const geomlib_trimesh *input,
     geomlib_trimesh *output
@@ -71,15 +72,18 @@ int geomlib_subdivide_midpoint(
     geomlib_trimesh *output
 );
 
-/* Compute smooth limit surface position for a vertex
- * Used for projecting subdivided mesh to limit surface
- */
+/* Loop limit position using the evaluation mask
+ * alpha_n = (3/8 + cos(2*pi/n)/4)^2 + 3/8 and epsilon_n = 3/(11 - 8 alpha_n):
+ * v_inf = epsilon_n v + (1 - epsilon_n) * mean(one-ring). Boundary vertices keep
+ * their position. */
 geomlib_vec3 geomlib_loop_limit_position(
     const geomlib_trimesh *mesh,
     uint32_t vertex_idx
 );
 
-/* Compute smooth limit normal for a vertex */
+/* Loop limit normal from the tangent masks tau_k = (cos(2*pi*k/n), sin(2*pi*k/n))
+ * over the cyclically ordered one-ring. Boundary vertices use the area-weighted
+ * vertex normal. */
 geomlib_vec3 geomlib_loop_limit_normal(
     const geomlib_trimesh *mesh,
     uint32_t vertex_idx

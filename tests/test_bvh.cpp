@@ -410,6 +410,44 @@ void test_bvh_performance() {
     geomlib_trimesh_free(&mesh);
 }
 
+void test_bvh_knn_query() {
+    printf("Testing BVH k-nearest-neighbor query...\n");
+
+    geomlib_trimesh mesh;
+    int result = geomlib_create_plane(&mesh, 10.0f, 10.0f, 5);
+    assert(result == GEOMLIB_MESH_SUCCESS);
+
+    geomlib_bvh bvh;
+    result = geomlib_bvh_build(&bvh, &mesh, GEOMLIB_BVH_QUALITY_MEDIUM);
+    assert(result == GEOMLIB_MESH_SUCCESS);
+
+    geomlib_vec3 query = {0.0f, 1.0f, 0.0f};
+    geomlib_vec3 points[5];
+    float distances[5];
+    uint32_t prim_ids[5];
+    size_t found = geomlib_bvh_knn_query(&bvh, query, 5, points, distances, prim_ids);
+    assert(found == 5);
+
+    for (size_t i = 0; i < found; i++) {
+        assert(prim_ids[i] < mesh.triangle_count);
+        assert(fabsf(points[i].y) < TEST_EPSILON);
+        float measured = geomlib_vec3_length(geomlib_vec3_sub(points[i], query));
+        assert(fabsf(measured - distances[i]) < TEST_EPSILON);
+        if (i) assert(distances[i] >= distances[i - 1] - TEST_EPSILON);
+        for (size_t j = 0; j < i; j++) assert(prim_ids[i] != prim_ids[j]);
+    }
+    assert(fabsf(distances[0] - 1.0f) < TEST_EPSILON);
+
+    /* Asking for more neighbors than available returns at most k. */
+    geomlib_vec3 many[1000];
+    assert(geomlib_bvh_knn_query(&bvh, query, 1000, many, NULL, NULL) <= mesh.triangle_count);
+
+    printf("  ✓ k-NN returned %zu sorted, distinct surface points\n", found);
+
+    geomlib_bvh_free(&bvh);
+    geomlib_trimesh_free(&mesh);
+}
+
 int main() {
     printf("=============================================\n");
     printf("geomlib BVH and Ray Tracing Tests\n");
@@ -424,6 +462,7 @@ int main() {
     test_bvh_occlusion();
     test_bvh_closest_point();
     test_bvh_radius_query();
+    test_bvh_knn_query();
     test_bvh_multiple_rays();
     test_bvh_performance();
 

@@ -160,9 +160,9 @@ void geomlib_mesh_stats_free(geomlib_mesh_stats *stats);
  * ============================================================================ */
 
 typedef enum geomlib_validation_level {
-    GEOMLIB_VALIDATE_BASIC,         /* Quick checks only */
-    GEOMLIB_VALIDATE_STANDARD,      /* Standard validation */
-    GEOMLIB_VALIDATE_STRICT         /* Thorough validation */
+    GEOMLIB_VALIDATE_BASIC,         /* Structure, indices, repeated indices, and zero area */
+    GEOMLIB_VALIDATE_STANDARD,      /* Also check coordinates, unused vertices, and topology */
+    GEOMLIB_VALIDATE_STRICT         /* Also check intersections and reject zero area */
 } geomlib_validation_level;
 
 typedef enum geomlib_validation_issue_type {
@@ -175,7 +175,9 @@ typedef enum geomlib_validation_issue_type {
     GEOMLIB_ISSUE_INCONSISTENT_ORIENTATION,
     GEOMLIB_ISSUE_SELF_INTERSECTION,
     GEOMLIB_ISSUE_ZERO_AREA_TRIANGLE,
-    GEOMLIB_ISSUE_INVERTED_TRIANGLE
+    GEOMLIB_ISSUE_INVERTED_TRIANGLE,
+    GEOMLIB_ISSUE_INVALID_MESH,
+    GEOMLIB_ISSUE_NONFINITE_VERTEX
 } geomlib_validation_issue_type;
 
 typedef struct geomlib_validation_issue {
@@ -213,7 +215,7 @@ typedef struct geomlib_mesh_difference {
     size_t triangle_count_diff;
 
     /* Geometric differences */
-    float hausdorff_distance;           /* Max distance */
+    float hausdorff_distance;           /* Max bidirectional vertex-to-surface sample */
     float avg_distance;                 /* Average distance */
     float rms_distance;                 /* Root mean square */
 
@@ -222,6 +224,8 @@ typedef struct geomlib_mesh_difference {
     float volume_diff_percent;
 } geomlib_mesh_difference;
 
+/* Distance statistics sample each mesh's vertices against the other mesh's triangles.
+ * Two empty meshes have zero distance; a missing target surface yields FLT_MAX. */
 geomlib_mesh_difference geomlib_compare_meshes(
     const geomlib_trimesh *mesh1,
     const geomlib_trimesh *mesh2

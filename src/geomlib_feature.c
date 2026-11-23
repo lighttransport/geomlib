@@ -52,6 +52,8 @@ float geomlib_compute_dihedral_angle(
     uint32_t face0,
     uint32_t face1
 ) {
+    (void)v0;
+    (void)v1;
     if (face1 == UINT32_MAX) {
         return 180.0f;  /* Boundary edge */
     }
@@ -221,6 +223,7 @@ bool geomlib_is_ridge(
     uint32_t v1,
     float threshold
 ) {
+    (void)mesh;
     /* Average max principal curvature at edge endpoints */
     float k0 = curvature->curvatures[v0].principal_max;
     float k1 = curvature->curvatures[v1].principal_max;
@@ -236,6 +239,7 @@ bool geomlib_is_valley(
     uint32_t v1,
     float threshold
 ) {
+    (void)mesh;
     /* Average min principal curvature at edge endpoints */
     float k0 = curvature->curvatures[v0].principal_min;
     float k1 = curvature->curvatures[v1].principal_min;
@@ -439,6 +443,35 @@ int geomlib_trace_feature_curve(
     return GEOMLIB_MESH_SUCCESS;
 }
 
+static int compare_feature_vertex(const void *a, const void *b) {
+    uint32_t left = *(const uint32_t*)a, right = *(const uint32_t*)b;
+    return (left > right) - (left < right);
+}
+
+static bool append_feature_curve(const geomlib_feature_edge *edges, const size_t *offsets,
+                                 const size_t *incident, bool *visited, uint32_t start,
+                                 size_t edge, uint32_t *path, uint32_t **curves,
+                                 size_t *lengths, size_t *curve_count) {
+    uint32_t vertex = start;
+    size_t length = 0;
+    path[length++] = vertex;
+    do {
+        visited[edge] = true;
+        vertex = edges[edge].v0 == vertex ? edges[edge].v1 : edges[edge].v0;
+        path[length++] = vertex;
+        size_t at = offsets[vertex];
+        if (vertex == start || offsets[vertex + 1] - at != 2) break;
+        edge = visited[incident[at]] ? incident[at + 1] : incident[at];
+    } while (!visited[edge]);
+
+    uint32_t *curve = (uint32_t*)malloc(length * sizeof(uint32_t));
+    if (!curve) return false;
+    memcpy(curve, path, length * sizeof(uint32_t));
+    curves[*curve_count] = curve;
+    lengths[(*curve_count)++] = length;
+    return true;
+}
+
 int geomlib_extract_feature_curves(
     const geomlib_feature_edge *edges,
     size_t edge_count,
@@ -446,43 +479,96 @@ int geomlib_extract_feature_curves(
     size_t **curve_lengths,
     size_t *curve_count
 ) {
-    if (edge_count == 0) {
-        *curves = NULL;
-        *curve_lengths = NULL;
-        *curve_count = 0;
-        return GEOMLIB_MESH_SUCCESS;
-    }
+    if (!curves || !curve_lengths || !curve_count) return GEOMLIB_MESH_ERROR_INVALID;
+    *curves = NULL;
+    *curve_lengths = NULL;
+    *curve_count = 0;
+    if (!edge_count) return GEOMLIB_MESH_SUCCESS;
+    if (!edges || edge_count > UINT32_MAX / 2 ||
+        edge_count > SIZE_MAX / sizeof(geomlib_feature_edge) ||
+        edge_count > SIZE_MAX / (2 * sizeof(size_t)))
+        return GEOMLIB_MESH_ERROR_INVALID;
 
+    /* Compact IDs keep storage proportional to the graph even for sparse mesh indices. */
+    geomlib_feature_edge *compact = (geomlib_feature_edge*)malloc(edge_count * sizeof(*compact));
+    uint32_t *vertices = (uint32_t*)malloc(edge_count * 2 * sizeof(uint32_t));
+    size_t *offsets = NULL, *cursor = NULL;
+    size_t *incident = (size_t*)malloc(edge_count * 2 * sizeof(size_t));
     bool *visited = (bool*)calloc(edge_count, sizeof(bool));
+    uint32_t *path = (uint32_t*)malloc((edge_count + 1) * sizeof(uint32_t));
+    uint32_t **output = (uint32_t**)malloc(edge_count * sizeof(*output));
+    size_t *lengths = (size_t*)malloc(edge_count * sizeof(size_t));
+    size_t count = 0;
+    int result = GEOMLIB_MESH_ERROR_MEMORY;
+    if (!compact || !vertices || !incident || !visited || !path || !output || !lengths) goto finish;
 
-    /* Temporary storage */
-    uint32_t **temp_curves = (uint32_t**)malloc(edge_count * sizeof(uint32_t*));
-    size_t *temp_lengths = (size_t*)malloc(edge_count * sizeof(size_t));
-    size_t num_curves = 0;
-
-    /* Start from each unvisited edge */
     for (size_t i = 0; i < edge_count; i++) {
-        if (visited[i]) continue;
-
-        uint32_t *curve = (uint32_t*)malloc(edge_count * 2 * sizeof(uint32_t));
-        size_t length;
-
-        visited[i] = true;
-        geomlib_trace_feature_curve(edges, edge_count, edges[i].v0,
-                                      visited, curve, &length);
-
-        temp_curves[num_curves] = curve;
-        temp_lengths[num_curves] = length;
-        num_curves++;
+        vertices[2 * i] = edges[i].v0;
+        vertices[2 * i + 1] = edges[i].v1;
+    }
+    qsort(vertices, edge_count * 2, sizeof(uint32_t), compare_feature_vertex);
+    size_t vertex_count = 0;
+    for (size_t i = 0; i < edge_count * 2; i++) {
+        if (!vertex_count || vertices[vertex_count - 1] != vertices[i])
+            vertices[vertex_count++] = vertices[i];
+    }
+    offsets = (size_t*)calloc(vertex_count + 1, sizeof(size_t));
+    cursor = (size_t*)malloc(vertex_count * sizeof(size_t));
+    if (!offsets || !cursor) goto finish;
+    for (size_t i = 0; i < edge_count; i++) {
+        const uint32_t *a = (const uint32_t*)bsearch(&edges[i].v0, vertices, vertex_count,
+                                                    sizeof(uint32_t), compare_feature_vertex);
+        const uint32_t *b = (const uint32_t*)bsearch(&edges[i].v1, vertices, vertex_count,
+                                                    sizeof(uint32_t), compare_feature_vertex);
+        compact[i].v0 = (uint32_t)(a - vertices);
+        compact[i].v1 = (uint32_t)(b - vertices);
+        offsets[compact[i].v0 + 1]++;
+        offsets[compact[i].v1 + 1]++;
+    }
+    for (size_t i = 0; i < vertex_count; i++) {
+        offsets[i + 1] += offsets[i];
+        cursor[i] = offsets[i];
+    }
+    for (size_t i = 0; i < edge_count; i++) {
+        incident[cursor[compact[i].v0]++] = i;
+        incident[cursor[compact[i].v1]++] = i;
     }
 
+    for (size_t v = 0; v < vertex_count; v++) {
+        if (offsets[v + 1] - offsets[v] == 2) continue;
+        for (size_t i = offsets[v]; i < offsets[v + 1]; i++) {
+            size_t edge = incident[i];
+            if (!visited[edge] && !append_feature_curve(compact, offsets, incident, visited,
+                (uint32_t)v, edge, path, output, lengths, &count)) goto finish;
+        }
+    }
+    for (size_t i = 0; i < edge_count; i++) {
+        if (!visited[i] && !append_feature_curve(compact, offsets, incident, visited,
+            compact[i].v0, i, path, output, lengths, &count)) goto finish;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        for (size_t v = 0; v < lengths[i]; v++) output[i][v] = vertices[output[i][v]];
+    }
+    *curves = output;
+    *curve_lengths = lengths;
+    *curve_count = count;
+    result = GEOMLIB_MESH_SUCCESS;
+
+finish:
+    if (result != GEOMLIB_MESH_SUCCESS) {
+        for (size_t i = 0; i < count; i++) free(output[i]);
+        free(output);
+        free(lengths);
+    }
+    free(compact);
+    free(vertices);
+    free(offsets);
+    free(cursor);
+    free(incident);
     free(visited);
-
-    *curves = temp_curves;
-    *curve_lengths = temp_lengths;
-    *curve_count = num_curves;
-
-    return GEOMLIB_MESH_SUCCESS;
+    free(path);
+    return result;
 }
 
 /* ============================================================================
@@ -563,38 +649,27 @@ geomlib_regions geomlib_segment_planar_regions(
     geomlib_regions regions;
     memset(&regions, 0, sizeof(geomlib_regions));
 
-    /* Simple region growing */
-    regions.triangle_labels = (uint32_t*)malloc(mesh->triangle_count * sizeof(uint32_t));
-    for (size_t i = 0; i < mesh->triangle_count; i++) {
-        regions.triangle_labels[i] = UINT32_MAX;  /* Unlabeled */
+    if (!mesh || !mesh->triangle_count || !mesh->vertices ||
+        !isfinite(angle_threshold_deg) || !isfinite(distance_threshold) || distance_threshold < 0.0f)
+        return regions;
+    geomlib_face_adjacency adjacency = geomlib_build_face_adjacency(mesh);
+    if (!adjacency.neighbors) return regions;
+
+    size_t faces = mesh->triangle_count;
+    regions.triangle_labels = (uint32_t*)malloc(faces * sizeof(uint32_t));
+    regions.regions = (geomlib_planar_region*)calloc(faces, sizeof(geomlib_planar_region));
+    geomlib_vec3 *triangle_normals = (geomlib_vec3*)malloc(faces * sizeof(geomlib_vec3));
+    uint32_t *queue = (uint32_t*)malloc(faces * sizeof(uint32_t));
+    if (!regions.triangle_labels || !regions.regions || !triangle_normals || !queue) goto error;
+
+    for (size_t i = 0; i < faces; i++) {
+        regions.triangle_labels[i] = UINT32_MAX;
+        geomlib_vec3 a, b, c;
+        geomlib_trimesh_get_triangle_vertices(mesh, i, &a, &b, &c);
+        triangle_normals[i] = geomlib_vec3_normalize(
+            geomlib_vec3_cross(geomlib_vec3_sub(b, a), geomlib_vec3_sub(c, a)));
     }
-
-    /* Build edge mesh for adjacency */
-    geomlib_edge_mesh edges = geomlib_build_edge_mesh(mesh);
-
-    /* Compute triangle normals */
-    geomlib_vec3 *triangle_normals = (geomlib_vec3*)malloc(mesh->triangle_count * sizeof(geomlib_vec3));
-    for (size_t i = 0; i < mesh->triangle_count; i++) {
-        geomlib_vec3 v0 = mesh->vertices[mesh->indices[i * 3 + 0]];
-        geomlib_vec3 v1 = mesh->vertices[mesh->indices[i * 3 + 1]];
-        geomlib_vec3 v2 = mesh->vertices[mesh->indices[i * 3 + 2]];
-        geomlib_vec3 e1 = geomlib_vec3_sub(v1, v0);
-        geomlib_vec3 e2 = geomlib_vec3_sub(v2, v0);
-        geomlib_vec3 cross = geomlib_vec3_cross(e1, e2);
-        triangle_normals[i] = geomlib_vec3_normalize(cross);
-    }
-
-    /* Allocate temp regions */
-    geomlib_planar_region *temp_regions = (geomlib_planar_region*)malloc(
-        mesh->triangle_count * sizeof(geomlib_planar_region));
-    size_t region_count = 0;
-
-    /* Angle threshold in radians */
-    float angle_threshold_rad = angle_threshold_deg * (float)M_PI / 180.0f;
-    float cos_threshold = cosf(angle_threshold_rad);
-
-    /* Queue for region growing */
-    uint32_t *queue = (uint32_t*)malloc(mesh->triangle_count * sizeof(uint32_t));
+    float cos_threshold = cosf(deg_to_rad(angle_threshold_deg));
 
     /* Region growing algorithm */
     for (size_t seed = 0; seed < mesh->triangle_count; seed++) {
@@ -602,70 +677,49 @@ geomlib_regions geomlib_segment_planar_regions(
             continue;  /* Already assigned */
         }
 
-        /* Start new region */
-        uint32_t region_id = (uint32_t)region_count;
-        size_t queue_head = 0;
-        size_t queue_tail = 0;
-
-        /* Temporary triangle list for this region */
-        uint32_t *region_triangles = (uint32_t*)malloc(mesh->triangle_count * sizeof(uint32_t));
-        size_t region_tri_count = 0;
-
-        /* Add seed to queue */
-        queue[queue_tail++] = (uint32_t)seed;
+        uint32_t region_id = (uint32_t)regions.region_count;
+        size_t head = 0, end = 0;
+        queue[end++] = (uint32_t)seed;
         regions.triangle_labels[seed] = region_id;
-        region_triangles[region_tri_count++] = (uint32_t)seed;
+        geomlib_vec3 normal = triangle_normals[seed];
+        geomlib_vec3 origin = mesh->vertices[mesh->indices[seed * 3]];
 
-        geomlib_vec3 seed_normal = triangle_normals[seed];
-
-        /* Grow region */
-        while (queue_head < queue_tail) {
-            uint32_t current = queue[queue_head++];
-
-            /* Check all edges of current triangle */
+        while (head < end) {
+            uint32_t current = queue[head++];
             for (int e = 0; e < 3; e++) {
-                uint32_t v0 = mesh->indices[current * 3 + e];
-                uint32_t v1 = mesh->indices[current * 3 + ((e + 1) % 3)];
-
-                /* Find edge */
-                for (size_t ei = 0; ei < edges.edge_count; ei++) {
-                    if ((edges.edges[ei].v0 == v0 && edges.edges[ei].v1 == v1) ||
-                        (edges.edges[ei].v0 == v1 && edges.edges[ei].v1 == v0)) {
-
-                        /* Get adjacent face */
-                        uint32_t neighbor = (edges.edges[ei].face0 == current) ?
-                            edges.edges[ei].face1 : edges.edges[ei].face0;
-
-                        if (neighbor == UINT32_MAX || regions.triangle_labels[neighbor] != UINT32_MAX) {
-                            continue;  /* Boundary edge or already assigned */
-                        }
-
-                        /* Check normal similarity */
-                        float dot = geomlib_vec3_dot(seed_normal, triangle_normals[neighbor]);
-                        if (dot >= cos_threshold) {
-                            /* Add to region */
-                            regions.triangle_labels[neighbor] = region_id;
-                            region_triangles[region_tri_count++] = neighbor;
-                            queue[queue_tail++] = neighbor;
-                        }
+                uint32_t neighbor = adjacency.neighbors[current * 3 + e];
+                if (neighbor == UINT32_MAX || regions.triangle_labels[neighbor] != UINT32_MAX ||
+                    geomlib_vec3_dot(normal, triangle_normals[neighbor]) < cos_threshold) continue;
+                bool near_plane = true;
+                for (int i = 0; i < 3; i++) {
+                    geomlib_vec3 p = mesh->vertices[mesh->indices[neighbor * 3 + i]];
+                    if (fabsf(geomlib_vec3_dot(geomlib_vec3_sub(p, origin), normal)) >
+                        distance_threshold) {
+                        near_plane = false;
                         break;
                     }
+                }
+                if (near_plane) {
+                    regions.triangle_labels[neighbor] = region_id;
+                    queue[end++] = neighbor;
                 }
             }
         }
 
-        /* Store region */
-        temp_regions[region_count].triangles = (uint32_t*)realloc(region_triangles,
-            region_tri_count * sizeof(uint32_t));
-        temp_regions[region_count].triangle_count = region_tri_count;
+        geomlib_planar_region *region = &regions.regions[regions.region_count];
+        region->triangles = (uint32_t*)malloc(end * sizeof(uint32_t));
+        if (!region->triangles) goto error;
+        memcpy(region->triangles, queue, end * sizeof(uint32_t));
+        region->triangle_count = end;
+        regions.region_count++;
 
         /* Compute plane: use average normal and centroid */
         geomlib_vec3 avg_normal = {0, 0, 0};
         geomlib_vec3 centroid = {0, 0, 0};
         float total_area = 0.0f;
 
-        for (size_t i = 0; i < region_tri_count; i++) {
-            uint32_t tri_idx = region_triangles[i];
+        for (size_t i = 0; i < end; i++) {
+            uint32_t tri_idx = queue[i];
             geomlib_vec3 v0 = mesh->vertices[mesh->indices[tri_idx * 3 + 0]];
             geomlib_vec3 v1 = mesh->vertices[mesh->indices[tri_idx * 3 + 1]];
             geomlib_vec3 v2 = mesh->vertices[mesh->indices[tri_idx * 3 + 2]];
@@ -684,16 +738,16 @@ geomlib_regions geomlib_segment_planar_regions(
         }
 
         avg_normal = geomlib_vec3_normalize(avg_normal);
-        centroid = geomlib_vec3_mul(centroid, 1.0f / total_area);
+        centroid = total_area > 0.0f ? geomlib_vec3_mul(centroid, 1.0f / total_area) : origin;
 
-        temp_regions[region_count].plane_normal = avg_normal;
-        temp_regions[region_count].plane_origin = centroid;
-        temp_regions[region_count].area = total_area;
+        region->plane_normal = avg_normal;
+        region->plane_origin = centroid;
+        region->area = total_area;
 
         /* Compute planarity (measure of flatness) */
         float max_distance = 0.0f;
-        for (size_t i = 0; i < region_tri_count; i++) {
-            uint32_t tri_idx = region_triangles[i];
+        for (size_t i = 0; i < end; i++) {
+            uint32_t tri_idx = queue[i];
             for (int v = 0; v < 3; v++) {
                 geomlib_vec3 vert = mesh->vertices[mesh->indices[tri_idx * 3 + v]];
                 geomlib_vec3 diff = geomlib_vec3_sub(vert, centroid);
@@ -703,20 +757,18 @@ geomlib_regions geomlib_segment_planar_regions(
                 }
             }
         }
-        temp_regions[region_count].planarity = 1.0f / (1.0f + max_distance);
+        region->planarity = 1.0f / (1.0f + max_distance);
 
-        region_count++;
     }
+    goto finish;
 
-    /* Cleanup */
+error:
+    geomlib_regions_free(&regions);
+    regions = (geomlib_regions){0};
+finish:
     free(queue);
     free(triangle_normals);
-    geomlib_edge_mesh_free(&edges);
-
-    regions.regions = (geomlib_planar_region*)realloc(temp_regions,
-        region_count * sizeof(geomlib_planar_region));
-    regions.region_count = region_count;
-
+    geomlib_face_adjacency_free(&adjacency);
     return regions;
 }
 

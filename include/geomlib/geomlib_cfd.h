@@ -56,7 +56,7 @@ typedef struct geomlib_fvm_face {
 /* Face-based mesh structure */
 typedef struct geomlib_fvm_mesh {
     /* Original mesh */
-    geomlib_tetramesh *tetramesh;  /* Volume mesh */
+    geomlib_tetramesh *tetramesh;  /* Borrowed source volume mesh */
 
     /* Face data */
     geomlib_fvm_face *faces;
@@ -72,7 +72,8 @@ typedef struct geomlib_fvm_mesh {
     uint32_t *cell_face_count;     /* Number of faces per cell */
 } geomlib_fvm_mesh;
 
-/* Build FVM mesh from tetrahedral mesh */
+/* Build unique faces and cell geometry. The source must outlive the result.
+ * Use an empty output; it is assigned only on success. */
 int geomlib_fvm_build(
     geomlib_fvm_mesh *fvm,
     const geomlib_tetramesh *tetramesh
@@ -92,7 +93,9 @@ typedef enum geomlib_gradient_method {
     GEOMLIB_GRADIENT_LEAST_SQUARES     /* Least-squares reconstruction */
 } geomlib_gradient_method;
 
-/* Compute gradient of scalar field */
+/* Allocate the vertex gradients of a nodal scalar field on a triangle mesh.
+ * Each method evaluates the same linear field on each triangle, then averages
+ * the tangential gradients at incident vertices using triangle area. */
 int geomlib_compute_gradient_scalar(
     const geomlib_trimesh *mesh,
     const geomlib_scalar_field *field,
@@ -100,7 +103,8 @@ int geomlib_compute_gradient_scalar(
     geomlib_vector_field *gradient
 );
 
-/* Compute gradient at tetrahedral mesh cells */
+/* Allocate one gradient per cell from scalar values at the tetrahedral vertices.
+ * Each supported method recovers the gradient of the linear interpolant. */
 int geomlib_compute_gradient_tetra(
     const geomlib_tetramesh *mesh,
     const geomlib_scalar_field *field,
@@ -108,14 +112,14 @@ int geomlib_compute_gradient_tetra(
     geomlib_vector_field *gradient
 );
 
-/* Gradient using Green-Gauss theorem */
+/* Green-Gauss gradient of a planar polygon with linearly varying values along each edge. */
 geomlib_vec3 geomlib_gradient_green_gauss(
     const geomlib_vec3 *vertices,
     const float *values,
     size_t count
 );
 
-/* Gradient using least-squares */
+/* Three-dimensional least-squares fit; neighbor_values are offsets from the center value. */
 geomlib_vec3 geomlib_gradient_least_squares(
     geomlib_vec3 center,
     const geomlib_vec3 *neighbor_positions,
@@ -127,21 +131,22 @@ geomlib_vec3 geomlib_gradient_least_squares(
  * Field Operations
  * ============================================================================ */
 
-/* Compute divergence of vector field */
+/* Tangential trace of the Jacobian of an ambient nodal vector field, averaged by area. */
 int geomlib_compute_divergence(
     const geomlib_trimesh *mesh,
     const geomlib_vector_field *field,
     geomlib_scalar_field *divergence
 );
 
-/* Compute curl of vector field */
+/* Normal component of the nodal vector field curl, averaged by incident triangle area. */
 int geomlib_compute_curl(
     const geomlib_trimesh *mesh,
     const geomlib_vector_field *field,
     geomlib_vector_field *curl
 );
 
-/* Compute Laplacian of scalar field */
+/* Cotangent Laplace-Beltrami operator with lumped vertex areas and the weak
+ * natural boundary convention. Field operators write to preallocated outputs. */
 int geomlib_compute_laplacian(
     const geomlib_trimesh *mesh,
     const geomlib_scalar_field *field,
@@ -161,7 +166,8 @@ typedef enum geomlib_interpolation_scheme {
     GEOMLIB_INTERP_MUSCL            /* MUSCL scheme */
 } geomlib_interpolation_scheme;
 
-/* Interpolate scalar value at point */
+/* Sample the nodal field at the closest surface point using barycentric weights.
+ * Point sampling uses linear weights for all scheme values. */
 float geomlib_interpolate_scalar(
     const geomlib_trimesh *mesh,
     const geomlib_scalar_field *field,
@@ -169,7 +175,7 @@ float geomlib_interpolate_scalar(
     geomlib_interpolation_scheme scheme
 );
 
-/* Interpolate vector value at point */
+/* Vector version of geomlib_interpolate_scalar. */
 geomlib_vec3 geomlib_interpolate_vector(
     const geomlib_trimesh *mesh,
     const geomlib_vector_field *field,
@@ -243,9 +249,9 @@ int geomlib_generate_streamlines(
 
 /* CFD-specific quality metrics */
 typedef struct geomlib_cfd_quality {
-    float skewness;                 /* Cell skewness [0,1], 0=orthogonal */
-    float non_orthogonality;        /* Non-orthogonality angle (degrees) */
-    float expansion_ratio;          /* Volume ratio to neighbors */
+    float skewness;                 /* Edge-length coefficient of variation, clamped to [0,1] */
+    float non_orthogonality;        /* Maximum interior-face non-orthogonality angle, in degrees */
+    float expansion_ratio;          /* Maximum larger-to-smaller volume ratio across interior faces */
     float face_flatness;            /* Face warping metric */
     bool is_valid;                  /* Meets CFD quality criteria */
 } geomlib_cfd_quality;

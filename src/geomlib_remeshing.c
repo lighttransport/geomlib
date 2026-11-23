@@ -158,24 +158,6 @@ static int get_vertex_valence(const geomlib_halfedge_mesh *hemesh, uint32_t vert
     return valence;
 }
 
-/* Helper: Check if edge flip improves valence */
-static bool should_flip_edge(
-    const geomlib_halfedge_mesh *hemesh,
-    uint32_t v0, uint32_t v1, uint32_t v2, uint32_t v3
-) {
-    /* Current valences */
-    int val0 = get_vertex_valence(hemesh, v0);
-    int val1 = get_vertex_valence(hemesh, v1);
-    int val2 = get_vertex_valence(hemesh, v2);
-    int val3 = get_vertex_valence(hemesh, v3);
-
-    /* Target valence is 6 for interior vertices */
-    int dev_before = abs(val0 - 6) + abs(val1 - 6) + abs(val2 - 6) + abs(val3 - 6);
-    int dev_after = abs(val0 - 1 - 6) + abs(val1 - 1 - 6) +
-                    abs(val2 + 1 - 6) + abs(val3 + 1 - 6);
-
-    return dev_after < dev_before;
-}
 
 /* Edge split operation */
 static bool split_edge(
@@ -219,7 +201,6 @@ static bool split_edge(
         uint32_t i2 = mesh->indices[face0 * 3 + 2];
 
         /* Find the opposite vertex */
-        uint32_t v_opp = (i0 != v0 && i0 != v1) ? i0 : ((i1 != v0 && i1 != v1) ? i1 : i2);
 
         /* Modify face0: v0, v_new, v_opp */
         /* Add new face: v_new, v1, v_opp */
@@ -241,7 +222,6 @@ static bool split_edge(
         uint32_t i1 = mesh->indices[face1 * 3 + 1];
         uint32_t i2 = mesh->indices[face1 * 3 + 2];
 
-        uint32_t v_opp = (i0 != v0 && i0 != v1) ? i0 : ((i1 != v0 && i1 != v1) ? i1 : i2);
 
         if (i0 == v1 && i1 == v0) {
             mesh->indices[face1 * 3 + 1] = v_new;
@@ -477,10 +457,6 @@ int geomlib_remesh(
     for (int iter = 0; iter < params->iterations; iter++) {
         /* 1. Edge Split */
         for (size_t face = 0; face < mesh->triangle_count; face++) {
-            uint32_t i0 = mesh->indices[face * 3 + 0];
-            uint32_t i1 = mesh->indices[face * 3 + 1];
-            uint32_t i2 = mesh->indices[face * 3 + 2];
-
             /* Check all three edges */
             for (int e = 0; e < 3; e++) {
                 uint32_t v0 = mesh->indices[face * 3 + e];
@@ -719,10 +695,6 @@ void geomlib_compute_remeshing_stats(
         uint32_t i0 = mesh->indices[i * 3 + 0];
         uint32_t i1 = mesh->indices[i * 3 + 1];
         uint32_t i2 = mesh->indices[i * 3 + 2];
-
-        geomlib_vec3 p0 = mesh->vertices[i0];
-        geomlib_vec3 p1 = mesh->vertices[i1];
-        geomlib_vec3 p2 = mesh->vertices[i2];
 
         /* Edge lengths */
         float l01 = edge_length(mesh, i0, i1);

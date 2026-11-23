@@ -3,6 +3,7 @@
  */
 
 #include "geomlib/geomlib_collision.h"
+#include "geomlib/geomlib_decimation.h"
 #include "geomlib/geomlib_solver.h"
 #include <stdlib.h>
 #include <string.h>
@@ -195,59 +196,276 @@ bool geomlib_obb_contains_point(const geomlib_obb *obb, geomlib_vec3 point) {
  * Convex Hull - Quickhull Algorithm
  * ============================================================================ */
 
-typedef struct hull_vertex {
-    geomlib_vec3 pos;
-    int index;
-} hull_vertex;
+typedef struct hull_triangle {
+    uint32_t v[3];
+    bool alive;
+} hull_triangle;
 
-typedef struct hull_face {
-    int v[3];                   /* Vertex indices */
-    geomlib_vec3 normal;        /* Face normal */
-    float plane_dist;           /* Distance from origin */
-    int visible;                /* Visibility flag */
-} hull_face;
+typedef struct hull_builder {
+    const geomlib_vec3 *points;
+    size_t point_count;
+    hull_triangle *faces;
+    size_t face_count;
+    size_t face_capacity;
+} hull_builder;
 
-static float point_plane_distance(geomlib_vec3 point, geomlib_vec3 normal, float plane_dist) {
-    return geomlib_vec3_dot(point, normal) - plane_dist;
+static int hull_add_triangle(hull_builder *builder, uint32_t a, uint32_t b, uint32_t c) {
+    if (a == b || b == c || a == c) return GEOMLIB_MESH_SUCCESS;
+    if (builder->face_count == builder->face_capacity) {
+        size_t capacity = builder->face_capacity ? builder->face_capacity * 2 : 16;
+        if (capacity > SIZE_MAX / sizeof(hull_triangle)) return GEOMLIB_MESH_ERROR_MEMORY;
+        hull_triangle *faces = realloc(builder->faces, capacity * sizeof(*faces));
+        if (!faces) return GEOMLIB_MESH_ERROR_MEMORY;
+        builder->faces = faces;
+        builder->face_capacity = capacity;
+    }
+    builder->faces[builder->face_count++] = (hull_triangle){{a, b, c}, true};
+    return GEOMLIB_MESH_SUCCESS;
 }
 
+static geomlib_vec3d hull_face_normal(const geomlib_vec3 *points, const hull_triangle *face) {
+    geomlib_vec3d a = {points[face->v[0]].x, points[face->v[0]].y, points[face->v[0]].z};
+    geomlib_vec3d b = {points[face->v[1]].x, points[face->v[1]].y, points[face->v[1]].z};
+    geomlib_vec3d c = {points[face->v[2]].x, points[face->v[2]].y, points[face->v[2]].z};
+    return geomlib_vec3d_cross(geomlib_vec3d_sub(b, a), geomlib_vec3d_sub(c, a));
+}
+
+static double hull_face_distance(const geomlib_vec3 *points, const hull_triangle *face,
+                                 size_t point) {
+    geomlib_vec3d normal = hull_face_normal(points, face);
+    double length = geomlib_vec3d_length(normal);
+    if (!(length > 1e-30)) return 0.0;
+    geomlib_vec3d origin = {points[face->v[0]].x, points[face->v[0]].y, points[face->v[0]].z};
+    geomlib_vec3d query = {points[point].x, points[point].y, points[point].z};
+    return geomlib_vec3d_dot(normal, geomlib_vec3d_sub(query, origin)) / length;
+}
+
+static int compare_hull_edges(const void *left, const void *right) {
+    uint64_t a = *(const uint64_t*)left, b = *(const uint64_t*)right;
+    return (a > b) - (a < b);
+}
+
+static void hull_orient_face(const geomlib_vec3 *positions, hull_triangle *face, geomlib_vec3 centroid) {
+    geomlib_vec3d a = {positions[face->v[0]].x, positions[face->v[0]].y, positions[face->v[0]].z};
+    geomlib_vec3d b = {positions[face->v[1]].x, positions[face->v[1]].y, positions[face->v[1]].z};
+    geomlib_vec3d c = {positions[face->v[2]].x, positions[face->v[2]].y, positions[face->v[2]].z};
+    geomlib_vec3d normal = geomlib_vec3d_cross(geomlib_vec3d_sub(b, a), geomlib_vec3d_sub(c, a));
+    geomlib_vec3d center = geomlib_vec3d_mul(geomlib_vec3d_add(geomlib_vec3d_add(a, b), c),
+                                             1.0 / 3.0);
+    geomlib_vec3d outward = geomlib_vec3d_sub(center,
+        (geomlib_vec3d){centroid.x, centroid.y, centroid.z});
+    if (geomlib_vec3d_dot(normal, outward) < 0.0) {
+        uint32_t swap = face->v[1];
+        face->v[1] = face->v[2];
+        face->v[2] = swap;
+    }
+}
+
+/* Incremental convex hull: begin with a tetrahedron and expand the horizon for
+ * every point outside the current hull. */
 int geomlib_compute_convex_hull(const geomlib_trimesh *mesh, geomlib_trimesh *hull_out) {
-    if (!mesh || !hull_out || mesh->vertex_count < 4) {
+    if (!mesh || !mesh->vertices || !hull_out || mesh->vertex_count < 4)
         return GEOMLIB_MESH_ERROR_INVALID;
-    }
-
-    /* For simplicity, use a basic gift wrapping approach */
-    /* Find extreme points along each axis */
-    size_t min_x = 0, max_x = 0, min_y = 0, max_y = 0, min_z = 0, max_z = 0;
-
-    for (size_t i = 1; i < mesh->vertex_count; i++) {
-        if (mesh->vertices[i].x < mesh->vertices[min_x].x) min_x = i;
-        if (mesh->vertices[i].x > mesh->vertices[max_x].x) max_x = i;
-        if (mesh->vertices[i].y < mesh->vertices[min_y].y) min_y = i;
-        if (mesh->vertices[i].y > mesh->vertices[max_y].y) max_y = i;
-        if (mesh->vertices[i].z < mesh->vertices[min_z].z) min_z = i;
-        if (mesh->vertices[i].z > mesh->vertices[max_z].z) max_z = i;
-    }
-
-    /* Create a simplified convex hull using these extreme points */
-    /* This is a basic implementation - full Quickhull would be more complex */
-
-    /* For now, create an approximate convex hull using AABB */
+    const geomlib_vec3 *points = mesh->vertices;
+    size_t count = mesh->vertex_count;
     geomlib_aabb bounds = geomlib_trimesh_compute_aabb(mesh);
+    double scale = geomlib_vec3d_length((geomlib_vec3d){
+        bounds.max.x - bounds.min.x, bounds.max.y - bounds.min.y, bounds.max.z - bounds.min.z});
+    if (!(scale > 0.0)) return GEOMLIB_MESH_ERROR_DEGENERATE;
+    double epsilon = 1e-7 * scale;
 
-    /* Generate box mesh from AABB */
-    float width = bounds.max.x - bounds.min.x;
-    float height = bounds.max.y - bounds.min.y;
-    float depth = bounds.max.z - bounds.min.z;
+    size_t i0 = 0;
+    for (size_t i = 1; i < count; i++)
+        if (points[i].x < points[i0].x) i0 = i;
+    size_t i1 = SIZE_MAX;
+    double best = 0.0;
+    for (size_t i = 0; i < count; i++) {
+        geomlib_vec3d delta = {points[i].x - points[i0].x, points[i].y - points[i0].y,
+                               points[i].z - points[i0].z};
+        double distance = geomlib_vec3d_dot(delta, delta);
+        if (distance > best) { best = distance; i1 = i; }
+    }
+    if (i1 == SIZE_MAX || best < epsilon * epsilon) return GEOMLIB_MESH_ERROR_DEGENERATE;
 
-    geomlib_create_box(hull_out, width, height, depth);
+    size_t i2 = SIZE_MAX;
+    best = 0.0;
+    geomlib_vec3d base = {points[i1].x - points[i0].x, points[i1].y - points[i0].y,
+                          points[i1].z - points[i0].z};
+    for (size_t i = 0; i < count; i++) {
+        geomlib_vec3d delta = {points[i].x - points[i0].x, points[i].y - points[i0].y,
+                               points[i].z - points[i0].z};
+        double area = geomlib_vec3d_length(geomlib_vec3d_cross(base, delta));
+        if (area > best) { best = area; i2 = i; }
+    }
+    if (i2 == SIZE_MAX || best < epsilon * scale) return GEOMLIB_MESH_ERROR_DEGENERATE;
 
-    /* Translate to correct position */
-    geomlib_vec3 center = geomlib_aabb_center(bounds);
-    for (size_t i = 0; i < hull_out->vertex_count; i++) {
-        hull_out->vertices[i] = geomlib_vec3_add(hull_out->vertices[i], center);
+    geomlib_vec3d normal = geomlib_vec3d_cross(base, (geomlib_vec3d){
+        points[i2].x - points[i0].x, points[i2].y - points[i0].y, points[i2].z - points[i0].z});
+    size_t i3 = SIZE_MAX;
+    best = 0.0;
+    for (size_t i = 0; i < count; i++) {
+        geomlib_vec3d delta = {points[i].x - points[i0].x, points[i].y - points[i0].y,
+                               points[i].z - points[i0].z};
+        double height = fabs(geomlib_vec3d_dot(normal, delta));
+        if (height > best) { best = height; i3 = i; }
+    }
+    if (i3 == SIZE_MAX || best < epsilon * scale * scale) return GEOMLIB_MESH_ERROR_DEGENERATE;
+
+    hull_builder builder = {points, count, NULL, 0, 0};
+    const uint32_t tetra[4] = {(uint32_t)i0, (uint32_t)i1, (uint32_t)i2, (uint32_t)i3};
+    const int face_vertices[4][3] = {{0, 1, 2}, {0, 1, 3}, {0, 2, 3}, {1, 2, 3}};
+    for (int f = 0; f < 4; f++) {
+        hull_triangle face = {{tetra[face_vertices[f][0]], tetra[face_vertices[f][1]],
+                               tetra[face_vertices[f][2]]}, true};
+        int opposite = -1;
+        for (int j = 0; j < 4; j++) {
+            bool used = false;
+            for (int k = 0; k < 3; k++) used |= tetra[j] == face.v[k];
+            if (!used) { opposite = j; break; }
+        }
+        if (opposite >= 0 && hull_face_distance(points, &face, tetra[opposite]) > 0.0) {
+            uint32_t swap = face.v[1];
+            face.v[1] = face.v[2];
+            face.v[2] = swap;
+        }
+        int status = hull_add_triangle(&builder, face.v[0], face.v[1], face.v[2]);
+        if (status != GEOMLIB_MESH_SUCCESS) {
+            free(builder.faces);
+            return status;
+        }
     }
 
+    uint64_t *edges = NULL;
+    size_t edge_capacity = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (i == i0 || i == i1 || i == i2 || i == i3) continue;
+        size_t base_faces = builder.face_count;
+        bool *visible = calloc(base_faces, sizeof(*visible));
+        if (!visible) { free(builder.faces); free(edges); return GEOMLIB_MESH_ERROR_MEMORY; }
+        size_t visible_count = 0;
+        for (size_t f = 0; f < base_faces; f++) {
+            if (!builder.faces[f].alive) continue;
+            if (hull_face_distance(points, &builder.faces[f], i) > epsilon) {
+                visible[f] = true;
+                visible_count++;
+            }
+        }
+        if (!visible_count) { free(visible); continue; }
+
+        size_t needed = 0;
+        for (size_t f = 0; f < base_faces; f++)
+            if (visible[f]) needed += 3;
+        if (needed > edge_capacity) {
+            uint64_t *grown = realloc(edges, needed * sizeof(*edges));
+            if (!grown) {
+                free(visible); free(builder.faces); free(edges);
+                return GEOMLIB_MESH_ERROR_MEMORY;
+            }
+            edges = grown;
+            edge_capacity = needed;
+        }
+        size_t edge_count = 0;
+        for (size_t f = 0; f < base_faces; f++) {
+            if (!visible[f]) continue;
+            for (int j = 0; j < 3; j++) {
+                uint32_t a = builder.faces[f].v[j];
+                uint32_t b = builder.faces[f].v[(j + 1) % 3];
+                edges[edge_count++] = ((uint64_t)a << 32) | b;
+            }
+        }
+        qsort(edges, edge_count, sizeof(*edges), compare_hull_edges);
+
+        int status = GEOMLIB_MESH_SUCCESS;
+        for (size_t e = 0; e < edge_count && status == GEOMLIB_MESH_SUCCESS; e++) {
+            uint64_t key = edges[e];
+            uint32_t a = (uint32_t)(key >> 32), b = (uint32_t)(key & UINT32_MAX);
+            uint64_t reverse = ((uint64_t)b << 32) | a;
+            if (bsearch(&reverse, edges, edge_count, sizeof(*edges), compare_hull_edges))
+                continue;  /* interior edge of the visible patch */
+            status = hull_add_triangle(&builder, a, b, (uint32_t)i);
+        }
+        for (size_t f = 0; f < base_faces; f++)
+            if (visible[f]) builder.faces[f].alive = false;
+        free(visible);
+        if (status != GEOMLIB_MESH_SUCCESS) {
+            free(builder.faces);
+            free(edges);
+            return status;
+        }
+    }
+    free(edges);
+
+    double area_epsilon = 1e-12 * scale * scale;
+    for (size_t f = 0; f < builder.face_count; f++) {
+        if (!builder.faces[f].alive) continue;
+        if (geomlib_vec3d_length(hull_face_normal(points, &builder.faces[f])) <= area_epsilon)
+            builder.faces[f].alive = false;
+    }
+
+    size_t alive_faces = 0;
+    for (size_t f = 0; f < builder.face_count; f++)
+        if (builder.faces[f].alive) alive_faces++;
+    if (!alive_faces) {
+        free(builder.faces);
+        return GEOMLIB_MESH_ERROR_DEGENERATE;
+    }
+
+    geomlib_vec3d centroid = {0};
+    size_t used = 0;
+    int32_t *remap = malloc(count * sizeof(*remap));
+    uint32_t *used_indices = malloc(count * sizeof(*used_indices));
+    if (!remap || !used_indices) {
+        free(builder.faces); free(remap); free(used_indices);
+        return GEOMLIB_MESH_ERROR_MEMORY;
+    }
+    for (size_t i = 0; i < count; i++) remap[i] = -1;
+    for (size_t f = 0; f < builder.face_count; f++) {
+        if (!builder.faces[f].alive) continue;
+        for (int j = 0; j < 3; j++) {
+            uint32_t v = builder.faces[f].v[j];
+            if (remap[v] < 0) {
+                remap[v] = (int32_t)used;
+                used_indices[used++] = v;
+                centroid = geomlib_vec3d_add(centroid,
+                    (geomlib_vec3d){points[v].x, points[v].y, points[v].z});
+            }
+        }
+    }
+    if (!used) {
+        free(builder.faces); free(remap); free(used_indices);
+        return GEOMLIB_MESH_ERROR_DEGENERATE;
+    }
+    centroid = geomlib_vec3d_mul(centroid, 1.0 / (double)used);
+    geomlib_vec3 centroid_float = {(float)centroid.x, (float)centroid.y, (float)centroid.z};
+
+    geomlib_trimesh_init(hull_out, used, alive_faces);
+    if ((used && !hull_out->vertices) || (alive_faces && !hull_out->indices)) {
+        geomlib_trimesh_free(hull_out);
+        free(builder.faces); free(remap); free(used_indices);
+        return GEOMLIB_MESH_ERROR_MEMORY;
+    }
+    for (size_t i = 0; i < used; i++) {
+        if (geomlib_trimesh_add_vertex(hull_out, points[used_indices[i]], NULL, NULL) !=
+            GEOMLIB_MESH_SUCCESS) {
+            geomlib_trimesh_free(hull_out);
+            free(builder.faces); free(remap); free(used_indices);
+            return GEOMLIB_MESH_ERROR_MEMORY;
+        }
+    }
+    for (size_t f = 0; f < builder.face_count; f++) {
+        if (!builder.faces[f].alive) continue;
+        hull_triangle face = builder.faces[f];
+        hull_orient_face(points, &face, centroid_float);
+        if (geomlib_trimesh_add_triangle(hull_out, remap[face.v[0]], remap[face.v[1]],
+                                         remap[face.v[2]]) != GEOMLIB_MESH_SUCCESS) {
+            geomlib_trimesh_free(hull_out);
+            free(builder.faces); free(remap); free(used_indices);
+            return GEOMLIB_MESH_ERROR_MEMORY;
+        }
+    }
+    free(builder.faces);
+    free(remap);
+    free(used_indices);
     return GEOMLIB_MESH_SUCCESS;
 }
 
@@ -282,52 +500,17 @@ bool geomlib_is_convex(const geomlib_trimesh *mesh, float epsilon) {
  * Mesh Simplification
  * ============================================================================ */
 
-typedef struct edge_collapse {
-    uint32_t v0, v1;           /* Edge vertices */
-    float cost;                 /* Collapse cost */
-    geomlib_vec3 target;        /* Target position */
-} edge_collapse;
-
-static float compute_collapse_cost(const geomlib_trimesh *mesh, uint32_t v0, uint32_t v1) {
-    /* Simplified cost: distance between vertices */
-    geomlib_vec3 p0 = mesh->vertices[v0];
-    geomlib_vec3 p1 = mesh->vertices[v1];
-    return geomlib_vec3_length(geomlib_vec3_sub(p1, p0));
-}
-
 int geomlib_simplify_mesh(geomlib_trimesh *mesh, size_t target_triangles, int preserve_boundary) {
     if (!mesh || target_triangles < 4 || target_triangles >= mesh->triangle_count) {
         return GEOMLIB_MESH_ERROR_INVALID;
     }
 
-    /* This is a simplified version - full implementation would use quadric error metrics */
-    /* For now, just uniformly sample triangles */
-
-    size_t current_count = mesh->triangle_count;
-    size_t step = current_count / target_triangles;
-    if (step < 1) step = 1;
-
-    /* Create new index buffer with reduced triangles */
-    size_t new_tri_count = 0;
-    for (size_t i = 0; i < current_count && new_tri_count < target_triangles; i += step) {
-        if (i + step >= current_count && new_tri_count < target_triangles) {
-            /* Include last triangle */
-            mesh->indices[new_tri_count * 3 + 0] = mesh->indices[i * 3 + 0];
-            mesh->indices[new_tri_count * 3 + 1] = mesh->indices[i * 3 + 1];
-            mesh->indices[new_tri_count * 3 + 2] = mesh->indices[i * 3 + 2];
-            new_tri_count++;
-            break;
-        }
-
-        mesh->indices[new_tri_count * 3 + 0] = mesh->indices[i * 3 + 0];
-        mesh->indices[new_tri_count * 3 + 1] = mesh->indices[i * 3 + 1];
-        mesh->indices[new_tri_count * 3 + 2] = mesh->indices[i * 3 + 2];
-        new_tri_count++;
-    }
-
-    mesh->triangle_count = new_tri_count;
-
-    return GEOMLIB_MESH_SUCCESS;
+    geomlib_decimation_params params = geomlib_decimation_params_default(0.0f);
+    params.target_triangle_count = target_triangles;
+    params.preserve_boundaries = preserve_boundary != 0;
+    params.boundary_weight = preserve_boundary ? 1000.0f : 0.0f;
+    geomlib_decimation_stats stats;
+    return geomlib_decimate_qem(mesh, &params, &stats);
 }
 
 int geomlib_simplify_mesh_ratio(geomlib_trimesh *mesh, float reduction_ratio, int preserve_boundary) {
@@ -381,7 +564,7 @@ int geomlib_generate_collision_proxy(
             proxy_out->normals = NULL;
             proxy_out->texcoords = NULL;
 
-            return geomlib_simplify_mesh(proxy_out, target_triangles, 1);
+            return geomlib_simplify_mesh(proxy_out, target_triangles, 0);
         }
 
         case GEOMLIB_PROXY_OBB:

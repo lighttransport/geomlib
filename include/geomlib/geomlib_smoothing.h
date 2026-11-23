@@ -17,8 +17,8 @@ extern "C" {
 /* Smoothing method */
 typedef enum geomlib_smoothing_method {
     GEOMLIB_SMOOTH_LAPLACIAN,    /* Basic Laplacian smoothing (may cause shrinkage) */
-    GEOMLIB_SMOOTH_TAUBIN,       /* Taubin smoothing (preserves volume) */
-    GEOMLIB_SMOOTH_HC            /* HC (Humphrey's Classes) smoothing */
+    GEOMLIB_SMOOTH_TAUBIN,       /* Taubin lambda/mu pair per iteration (volume preserving) */
+    GEOMLIB_SMOOTH_HC            /* HC (Humphrey's Classes) feature correction */
 } geomlib_smoothing_method;
 
 /* Smoothing parameters */
@@ -38,8 +38,8 @@ typedef struct geomlib_smoothing_params {
 
     /* General */
     bool preserve_boundaries;    /* Don't move boundary vertices */
-    bool preserve_features;      /* Preserve sharp features (not implemented) */
-    float feature_angle;         /* Feature detection threshold in degrees */
+    bool preserve_features;      /* Freeze vertices incident to detected sharp edges */
+    float feature_angle;         /* Sharp-edge threshold in degrees */
 } geomlib_smoothing_params;
 
 /* Create default smoothing parameters */

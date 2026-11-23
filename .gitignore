@@ -42,6 +42,7 @@
 
 # Build directories
 build/
+build-*/
 cmake-build-*/
 _codeql_build_dir/
 _codeql_detected_source_root
@@ -67,6 +68,13 @@ node_modules/
 
 # WebAssembly build artifacts
 web/build/
+web/demo/dist/
 web/demo/public/*.wasm
 web/demo/public/*.js
 !web/demo/public/index.html
+
+# In-source CFD test executable
+/tests/test_cfd
+
+# Local tooling state
+.commandcode/

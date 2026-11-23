@@ -1,6 +1,5 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import createGeomlibModule from './public/geomlib.js';
 import { loadPointCloudFile } from './fileLoaders.js';
 
 // ============================================================================
@@ -24,6 +23,8 @@ const state = {
   showProxy: false,
   showBVH: false,
   showPoints: false,
+  showComponents: false,
+  showBoundaries: false,
   bvhMaxDepth: 3
 };
 
@@ -127,14 +128,8 @@ function createThreeMesh(geomlibMesh, color = 0x4CAF50, wireframe = false) {
 }
 
 function displayMesh(geomlibMesh, isProxy = false) {
-  // Remove old mesh
-  if (!isProxy && mainMeshGroup) {
-    scene.remove(mainMeshGroup);
-    mainMeshGroup = null;
-  } else if (isProxy && proxyMeshGroup) {
-    scene.remove(proxyMeshGroup);
-    proxyMeshGroup = null;
-  }
+  if (isProxy) removeMeshGroup(proxyMeshGroup);
+  else removeMeshGroup(mainMeshGroup);
 
   // Create mesh group
   const group = new THREE.Group();
@@ -158,25 +153,67 @@ function displayMesh(geomlibMesh, isProxy = false) {
     proxyMeshGroup.visible = state.showProxy;
   } else {
     mainMeshGroup = group;
+    const components = state.showComponents ? geomlib.findConnectedComponents(geomlibMesh) : null;
+    const boundaries = state.showBoundaries ? geomlib.extractBoundaryLoops(geomlibMesh) : null;
+    if (components) colorComponents(solidMesh, components.vertexLabels);
+    if (boundaries) drawBoundaryLoops(group, solidMesh.geometry.attributes.position, boundaries.loops);
+    updateMeshStats(geomlibMesh, components, boundaries);
   }
-
-  // Update statistics
-  updateMeshStats(geomlibMesh);
 }
 
-function updateMeshStats(geomlibMesh) {
-  const stats = document.getElementById('mesh-stats');
-  const verts = geomlibMesh.getVertexCount();
-  const tris = geomlibMesh.getTriangleCount();
-  const area = geomlibMesh.getSurfaceArea();
-  const volume = geomlibMesh.getVolume();
+function removeMeshGroup(group) {
+  if (!group) return;
+  scene.remove(group);
+  group.traverse(object => {
+    object.geometry?.dispose();
+    object.material?.dispose();
+  });
+}
 
-  stats.innerHTML = `
-    <strong>Mesh:</strong><br>
-    Vertices: ${verts}<br>
-    Triangles: ${tris}<br>
-    Surface Area: ${area.toFixed(3)}<br>
-    Volume: ${volume.toFixed(3)}
+function colorComponents(mesh, labels) {
+  const colors = new Float32Array(labels.length * 3);
+  const color = new THREE.Color();
+  for (let i = 0; i < labels.length; i++) {
+    color.setHSL((0.34 + labels[i] * 0.618034) % 1, 0.7, 0.53);
+    color.toArray(colors, i * 3);
+  }
+  mesh.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  mesh.material.color.set(0xffffff);
+  mesh.material.vertexColors = true;
+}
+
+function drawBoundaryLoops(group, vertices, loops) {
+  if (!loops.length) return;
+  const positions = [];
+  for (const loop of loops) {
+    for (let i = 0; i < loop.vertices.length; i++) {
+      const a = loop.vertices[i];
+      const b = loop.vertices[(i + 1) % loop.vertices.length];
+      positions.push(vertices.getX(a), vertices.getY(a), vertices.getZ(a));
+      positions.push(vertices.getX(b), vertices.getY(b), vertices.getZ(b));
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  const material = new THREE.LineBasicMaterial({ color: 0xffd166, depthTest: false, depthWrite: false });
+  const lines = new THREE.LineSegments(geometry, material);
+  lines.renderOrder = 1;
+  group.add(lines);
+}
+
+function updateMeshStats(mesh, components, boundaries) {
+  const stats = geomlib.computeMeshStatistics(mesh, 0);
+  const statsDiv = document.getElementById('mesh-stats');
+  statsDiv.innerHTML = `
+    Vertices: ${stats.vertexCount}<br>
+    Triangles: ${stats.triangleCount}<br>
+    Edges: ${stats.edgeCount}<br>
+    Surface area: ${stats.surfaceArea.toFixed(3)}<br>
+    ${stats.isClosed ? `Volume: ${stats.volume.toFixed(3)}<br>` : ''}
+    Median edge length: ${stats.edges.median.toFixed(3)}<br>
+    Minimum angle: ${stats.angles.min.toFixed(1)}°<br>
+    ${components ? `Components: ${components.componentCount}<br>` : ''}
+    ${boundaries ? `Boundary loops: ${boundaries.loopCount}<br>` : ''}
   `;
 }
 
@@ -443,6 +480,37 @@ function setupEventHandlers() {
     castRandomRays(50);
   });
 
+  document.getElementById('btn-extract-sdf').addEventListener('click', () => {
+    const status = document.getElementById('sdf-status');
+    if (!currentMesh) {
+      status.textContent = 'Create a mesh first.';
+      return;
+    }
+    const sdf = geomlib.generateSDFResolution(currentMesh, 20);
+    if (!sdf) {
+      status.textContent = 'Could not generate a distance field for this mesh.';
+      return;
+    }
+    let extracted;
+    try {
+      extracted = sdf.extractSurface(0);
+    } finally {
+      sdf.delete();
+    }
+    if (!extracted || !extracted.getTriangleCount()) {
+      extracted?.delete();
+      status.textContent = 'The distance field contains no extractable surface.';
+      return;
+    }
+    const source = currentMesh;
+    clearBVH();
+    clearProxy();
+    currentMesh = extracted;
+    displayMesh(currentMesh);
+    source.delete();
+    status.textContent = 'Rebuilt the mesh from the zero level set.';
+  });
+
   // Mesh healing
   document.getElementById('btn-analyze').addEventListener('click', () => {
     if (!currentMesh) {
@@ -560,6 +628,16 @@ function setupEventHandlers() {
     if (currentProxy) displayMesh(currentProxy, true);
   });
 
+  document.getElementById('chk-components').addEventListener('change', (event) => {
+    state.showComponents = event.target.checked;
+    if (currentMesh) displayMesh(currentMesh);
+  });
+
+  document.getElementById('chk-boundaries').addEventListener('change', (event) => {
+    state.showBoundaries = event.target.checked;
+    if (currentMesh) displayMesh(currentMesh);
+  });
+
   document.getElementById('chk-proxy').addEventListener('change', (e) => {
     state.showProxy = e.target.checked;
     updateProxyVisibility();
@@ -649,7 +727,7 @@ function setupEventHandlers() {
 
 function clearMesh() {
   if (mainMeshGroup) {
-    scene.remove(mainMeshGroup);
+    removeMeshGroup(mainMeshGroup);
     mainMeshGroup = null;
   }
   currentMesh = null;
@@ -658,7 +736,7 @@ function clearMesh() {
 
 function clearProxy() {
   if (proxyMeshGroup) {
-    scene.remove(proxyMeshGroup);
+    removeMeshGroup(proxyMeshGroup);
     proxyMeshGroup = null;
   }
   currentProxy = null;
@@ -875,6 +953,8 @@ async function init() {
 
   // Load WebAssembly module
   try {
+    const moduleUrl = new URL(`${import.meta.env.BASE_URL}geomlib.js`, window.location.href);
+    const { default: createGeomlibModule } = await import(/* @vite-ignore */ moduleUrl.href);
     geomlib = await createGeomlibModule();
     console.log('Geomlib module loaded successfully');
 

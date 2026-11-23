@@ -18,6 +18,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # Build options
 option(GEOMLIB_BUILD_TESTS "Build tests" ON)
 option(GEOMLIB_BUILD_EXAMPLES "Build examples" OFF)
+option(GEOMLIB_BUILD_BENCHMARKS "Build benchmark tools" OFF)
 
 # No RTTI, no exceptions
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -74,6 +75,12 @@ endif()
 if(GEOMLIB_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+# Benchmarks
+if(GEOMLIB_BUILD_BENCHMARKS)
+    add_executable(benchmark_sdf scripts/benchmark_sdf.c)
+    target_link_libraries(benchmark_sdf PRIVATE geomlib)
 endif()
 
 # Installation
