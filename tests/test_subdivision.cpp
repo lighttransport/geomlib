@@ -191,6 +191,37 @@ static int test_loop_boundary_and_projection() {
     return 0;
 }
 
+static int test_catmull_clark() {
+    /* create_box emits duplicated vertices per face; weld it first. */
+    geomlib_trimesh raw_box = {};
+    geomlib_create_box(&raw_box, 1.0f, 1.0f, 1.0f);
+    geomlib_trimesh box = raw_box;
+    geomlib_weld_result weld = geomlib_weld_vertices(&box, 1e-5f);
+    geomlib_apply_weld_result(&box, &weld);
+    geomlib_weld_result_free(&weld);
+    geomlib_trimesh out = {};
+    CHECK(geomlib_subdivide_catmull_clark(&box, &out) == GEOMLIB_MESH_SUCCESS,
+          "Catmull-Clark subdivision should succeed");
+    CHECK(out.triangle_count == box.triangle_count * 6,
+          "Catmull-Clark splits each triangle into six triangles");
+    CHECK(out.vertex_count > box.vertex_count,
+          "Catmull-Clark adds face and edge points");
+    /* The subdivided box stays closed and manifold. */
+    geomlib_manifold_analysis analysis = geomlib_analyze_manifold(&out);
+    if (!(analysis.is_closed && analysis.is_manifold))
+        std::printf("  CC analysis: closed=%d manifold=%d edge=%d vertex=%d oriented=%d bad=%zu\n",
+                    analysis.is_closed ? 1 : 0, analysis.is_manifold ? 1 : 0,
+                    analysis.is_edge_manifold ? 1 : 0,
+                    analysis.is_vertex_manifold ? 1 : 0,
+                    analysis.is_oriented ? 1 : 0, analysis.nonmanifold_count);
+    CHECK(analysis.is_closed && analysis.is_manifold,
+          "Catmull-Clark preserves a closed manifold");
+    geomlib_manifold_analysis_free(&analysis);
+    geomlib_trimesh_free(&out);
+    geomlib_trimesh_free(&box);
+    return 0;
+}
+
 int main() {
     std::printf("=== Subdivision Test Suite ===\n\n");
     int failures = 0;
@@ -198,6 +229,7 @@ int main() {
     failures += test_butterfly_stencil();
     failures += test_loop_limit();
     failures += test_loop_boundary_and_projection();
+    failures += test_catmull_clark();
     if (!failures) std::printf("=== ALL TESTS PASSED ===\n");
     else std::printf("=== %d TESTS FAILED ===\n", failures);
     return failures;

@@ -11,6 +11,8 @@ BUILD_TESTS="ON"
 BUILD_EXAMPLES="OFF"
 INSTALL_PREFIX=""
 EXTRA_CMAKE_ARGS=""
+WASM_BUILD="OFF"
+STRICT_C11="OFF"
 
 # Print usage
 usage() {
@@ -24,6 +26,8 @@ Options:
     -t, --no-tests          Disable building tests (default: enabled)
     -e, --examples          Enable building examples (default: disabled)
     -p, --prefix PATH       Installation prefix
+    --wasm                  Configure the Emscripten WebAssembly build
+    --strict-c11            Enforce strict C11 (-pedantic -Werror) in CI
     --cmake-args ARGS       Additional CMake arguments
 
 Examples:
@@ -63,6 +67,14 @@ while [[ $# -gt 0 ]]; do
             INSTALL_PREFIX="$2"
             shift 2
             ;;
+        --wasm)
+            WASM_BUILD="ON"
+            shift
+            ;;
+        --strict-c11)
+            STRICT_C11="ON"
+            shift
+            ;;
         --cmake-args)
             EXTRA_CMAKE_ARGS="$2"
             shift 2
@@ -90,15 +102,27 @@ if [ -n "$INSTALL_PREFIX" ]; then
 fi
 echo "==================================="
 
+# The Emscripten project lives in web/, so its build directory is web/build.
+if [ "$WASM_BUILD" = "ON" ] && [ "$BUILD_DIR" = "build" ]; then
+    BUILD_DIR="web/build"
+fi
+
 # Create build directory
 mkdir -p "$PROJECT_ROOT/$BUILD_DIR"
 cd "$PROJECT_ROOT/$BUILD_DIR"
 
 # Prepare CMake command
-CMAKE_CMD="cmake"
+if [ "$WASM_BUILD" = "ON" ]; then
+    CMAKE_CMD="emcmake cmake"
+else
+    CMAKE_CMD="cmake"
+fi
 CMAKE_CMD="$CMAKE_CMD -DCMAKE_BUILD_TYPE=$BUILD_TYPE"
 CMAKE_CMD="$CMAKE_CMD -DGEOMLIB_BUILD_TESTS=$BUILD_TESTS"
-CMAKE_CMD="$CMAKE_CMD -DGEOMLIB_BUILD_EXAMPLES=$BUILD_EXAMPLES"
+if [ "$BUILD_EXAMPLES" = "ON" ]; then
+    echo "Warning: --examples is deprecated; no example targets exist." >&2
+fi
+CMAKE_CMD="$CMAKE_CMD -DGEOMLIB_STRICT_C11=$STRICT_C11"
 
 if [ -n "$INSTALL_PREFIX" ]; then
     CMAKE_CMD="$CMAKE_CMD -DCMAKE_INSTALL_PREFIX=$INSTALL_PREFIX"
@@ -121,7 +145,12 @@ echo ""
 echo "==================================="
 echo "Configuration complete!"
 echo "==================================="
-echo "To build:         cd $BUILD_DIR && make"
-echo "To test:          cd $BUILD_DIR && ctest"
-echo "To install:       cd $BUILD_DIR && make install"
+if [ "$WASM_BUILD" = "ON" ]; then
+    echo "To build:         cd $BUILD_DIR && emmake make"
+    echo "To test:          cd web && node smoke.mjs"
+else
+    echo "To build:         cd $BUILD_DIR && make"
+    echo "To test:          cd $BUILD_DIR && ctest"
+    echo "To install:       cd $BUILD_DIR && make install"
+fi
 echo "==================================="

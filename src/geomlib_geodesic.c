@@ -141,6 +141,11 @@ static int geo_build_operator(const geomlib_trimesh *mesh, geo_operator *op) {
             double cross = geomlib_vec3d_length(geomlib_vec3d_cross(u, v));
             if (!(cross > 1e-20)) continue;
             double cot = geomlib_vec3d_dot(u, v) / cross;
+            /* Near-degenerate slivers make cotangents explode (e.g. sphere
+             * pole fans), which renders the heat system numerically useless.
+             * Clamp to a stable range; this is the standard cotangent clamp. */
+            if (cot > 2.0) cot = 2.0;
+            if (cot < -2.0) cot = -2.0;
             raw_geo_edge entry;
             if (index[i] < index[j]) { entry.a = index[i]; entry.b = index[j]; }
             else { entry.a = index[j]; entry.b = index[i]; }
@@ -198,6 +203,18 @@ static int geo_build_operator(const geomlib_trimesh *mesh, geo_operator *op) {
     free(raw);
     free(counts);
     free(cursor);
+
+    /* Vertices whose incident triangles are all degenerate have zero lumped
+     * mass, which makes their heat-system row degenerate. Give them a small
+     * fraction of the mean mass so the system stays nonsingular. */
+    {
+        double mean_mass = 0.0;
+        for (size_t i = 0; i < n; i++) mean_mass += mass[i];
+        mean_mass /= (double)(n ? n : 1);
+        double floor_mass = (mean_mass > 0.0) ? mean_mass * 1e-6 : 1e-12;
+        for (size_t i = 0; i < n; i++)
+            if (!(mass[i] > floor_mass)) mass[i] = floor_mass;
+    }
 
     op->count = n;
     op->offsets = offsets;
@@ -351,6 +368,21 @@ static int geodesic_heat_solve(const geomlib_trimesh *mesh, const uint32_t *sour
         divergence[i0] += (float)(area * geomlib_vec3_dot(grad[0], face_vectors[tri]));
         divergence[i1] += (float)(area * geomlib_vec3_dot(grad[1], face_vectors[tri]));
         divergence[i2] += (float)(area * geomlib_vec3_dot(grad[2], face_vectors[tri]));
+    }
+
+    {
+        double dmax = 0.0;
+        for (size_t i = 0; i < n; i++) {
+            double v = fabs((double)divergence[i]);
+            if (v > dmax) dmax = v;
+        }
+        /* A source surrounded only by degenerate faces produces no gradient:
+         * the continuous heat method is undefined there. Let the caller use
+         * the discrete edge-propagation fallback instead. */
+        if (!(dmax > 1e-12)) {
+            status = GEOMLIB_MESH_ERROR_INVALID;
+            goto finish;
+        }
     }
 
     double trace = 0.0;

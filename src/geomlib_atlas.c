@@ -220,11 +220,8 @@ static int parameterize_chart(
 
     /* Parameterize */
     geomlib_param_params uv_params = geomlib_param_params_default(method);
-    geomlib_uv_coords uv_coords;
-    uv_coords.uvs = NULL;
-    uv_coords.vertex_count = 0;
-    uv_coords.distortion = NULL;
-    uv_coords.triangle_count = 0;
+    geomlib_uv_coords uv_coords = geomlib_uv_coords_create(vertex_count,
+                                                           chart->triangle_count);
 
     int result = geomlib_parameterize(&chart_mesh, &uv_params, &uv_coords);
 
@@ -249,10 +246,137 @@ static int parameterize_chart(
     free(vertex_used);
     free(vertex_remap);
     geomlib_trimesh_free(&chart_mesh);
-    if (uv_coords.uvs) free(uv_coords.uvs);
-    if (uv_coords.distortion) free(uv_coords.distortion);
+    geomlib_uv_coords_free(&uv_coords);
 
     return result;
+}
+
+/* Generic region growing driven by a per-triangle acceptance predicate. */
+typedef int (*chart_predicate)(const geomlib_trimesh *mesh, size_t seed,
+                               size_t candidate, const void *context);
+
+static int segment_by_predicate(const geomlib_trimesh *mesh,
+                                geomlib_atlas *atlas,
+                                chart_predicate accepts, const void *context)
+{
+    bool *assigned;
+    size_t t, i;
+
+    if (!mesh || !atlas || !accepts) return GEOMLIB_MESH_ERROR_INVALID;
+    assigned = (bool *)calloc(mesh->triangle_count, sizeof(bool));
+    if (!assigned) return GEOMLIB_MESH_ERROR_MEMORY;
+
+    atlas->chart_count = 0;
+    for (t = 0; t < mesh->triangle_count; ++t) {
+        if (assigned[t]) continue;
+        if (atlas->chart_count >= 256) break;
+
+        geomlib_atlas_chart *chart = &atlas->charts[atlas->chart_count];
+        chart->triangles = (uint32_t *)malloc(mesh->triangle_count * sizeof(uint32_t));
+        chart->triangle_count = 0;
+        if (!chart->triangles) { free(assigned); return GEOMLIB_MESH_ERROR_MEMORY; }
+
+        uint32_t *queue = (uint32_t *)malloc(mesh->triangle_count * sizeof(uint32_t));
+        if (!queue) { free(chart->triangles); free(assigned); return GEOMLIB_MESH_ERROR_MEMORY; }
+        size_t qsize = 0;
+        queue[qsize++] = (uint32_t)t;
+        assigned[t] = true;
+
+        while (qsize > 0) {
+            uint32_t current = queue[--qsize];
+            chart->triangles[chart->triangle_count++] = current;
+            for (i = 0; i < mesh->triangle_count; ++i) {
+                if (assigned[i]) continue;
+                if (accepts(mesh, current, i, context)) {
+                    assigned[i] = true;
+                    queue[qsize++] = (uint32_t)i;
+                }
+            }
+        }
+        free(queue);
+        atlas->chart_count++;
+    }
+
+    free(assigned);
+    return GEOMLIB_MESH_SUCCESS;
+}
+
+/* Planarity criterion: similar normal and vertices close to the chart plane. */
+typedef struct {
+    geomlib_vec3 *normals;
+    float cos_threshold;
+    float distance_epsilon;
+} planarity_context;
+
+static int accepts_planar(const geomlib_trimesh *mesh, size_t seed,
+                          size_t candidate, const void *ctx)
+{
+    const planarity_context *c = (const planarity_context *)ctx;
+    uint32_t a = mesh->indices[seed*3], b = mesh->indices[seed*3+1], cc = mesh->indices[seed*3+2];
+    geomlib_vec3 point = mesh->vertices[a];
+    geomlib_vec3 normal = c->normals[seed];
+    (void)b; (void)cc;
+    if (geomlib_vec3_dot(normal, c->normals[candidate]) < c->cos_threshold) return 0;
+    for (int k = 0; k < 3; ++k) {
+        uint32_t v = mesh->indices[candidate*3+k];
+        geomlib_vec3 d = geomlib_vec3_sub(mesh->vertices[v], point);
+        if (fabsf(geomlib_vec3_dot(d, normal)) > c->distance_epsilon) return 0;
+    }
+    return 1;
+}
+
+static int segment_by_planarity(const geomlib_trimesh *mesh,
+                                const geomlib_atlas_params *params,
+                                geomlib_atlas *atlas)
+{
+    planarity_context ctx;
+    size_t t;
+    ctx.normals = (geomlib_vec3 *)malloc(mesh->triangle_count * sizeof(geomlib_vec3));
+    if (!ctx.normals) return GEOMLIB_MESH_ERROR_MEMORY;
+    for (t = 0; t < mesh->triangle_count; ++t) {
+        uint32_t i0 = mesh->indices[t*3], i1 = mesh->indices[t*3+1], i2 = mesh->indices[t*3+2];
+        ctx.normals[t] = compute_triangle_normal(mesh->vertices[i0], mesh->vertices[i1],
+                                                 mesh->vertices[i2]);
+    }
+    ctx.cos_threshold = cosf(params->normal_threshold * (float)M_PI / 180.0f);
+    {
+        geomlib_aabb box = geomlib_trimesh_compute_aabb(mesh);
+        geomlib_vec3 size = geomlib_aabb_size(box);
+        float diag = geomlib_vec3_length(size);
+        ctx.distance_epsilon = 0.01f * diag;
+    }
+    int rc = segment_by_predicate(mesh, atlas, accepts_planar, &ctx);
+    free(ctx.normals);
+    return rc;
+}
+
+/* Distortion criterion: triangles with comparable shape anisotropy. */
+static float triangle_anisotropy(const geomlib_trimesh *mesh, size_t t)
+{
+    uint32_t i0 = mesh->indices[t*3], i1 = mesh->indices[t*3+1], i2 = mesh->indices[t*3+2];
+    float a = geomlib_vec3_length(geomlib_vec3_sub(mesh->vertices[i1], mesh->vertices[i0]));
+    float b = geomlib_vec3_length(geomlib_vec3_sub(mesh->vertices[i2], mesh->vertices[i1]));
+    float c = geomlib_vec3_length(geomlib_vec3_sub(mesh->vertices[i0], mesh->vertices[i2]));
+    float lo = a < b ? a : b; if (c < lo) lo = c;
+    float hi = a > b ? a : b; if (c > hi) hi = c;
+    return (lo > 1e-8f) ? hi / lo : 1.0f;
+}
+
+static int accepts_similar_distortion(const geomlib_trimesh *mesh, size_t seed,
+                                      size_t candidate, const void *ctx)
+{
+    const geomlib_atlas_params *p = (const geomlib_atlas_params *)ctx;
+    float a = triangle_anisotropy(mesh, seed);
+    float b = triangle_anisotropy(mesh, candidate);
+    float limit = 1.0f + 0.5f * (p->distortion_threshold - 1.0f);
+    return (a <= b * limit) && (b <= a * limit);
+}
+
+static int segment_by_distortion(const geomlib_trimesh *mesh,
+                                 const geomlib_atlas_params *params,
+                                 geomlib_atlas *atlas)
+{
+    return segment_by_predicate(mesh, atlas, accepts_similar_distortion, params);
 }
 
 /* Segment mesh into charts */
@@ -267,6 +391,10 @@ int geomlib_atlas_segment_mesh(
         case GEOMLIB_ATLAS_SEG_NORMAL_CLUSTER:
         case GEOMLIB_ATLAS_SEG_AUTO:
             return segment_by_normals(mesh, params, atlas);
+        case GEOMLIB_ATLAS_SEG_PLANARITY:
+            return segment_by_planarity(mesh, params, atlas);
+        case GEOMLIB_ATLAS_SEG_DISTORTION:
+            return segment_by_distortion(mesh, params, atlas);
 
         default:
             /* Fallback: single chart */
@@ -352,6 +480,193 @@ static int pack_charts_shelf(
     return GEOMLIB_MESH_SUCCESS;
 }
 
+/* Rotate chart UVs to minimize bounding-box area (chart-local copy only). */
+static void optimize_chart_rotation(geomlib_atlas_chart *chart)
+{
+    float best_area = FLT_MAX, best_angle = 0.0f;
+    geomlib_vec2 best_min = {0,0}, best_max = {1,1};
+    int step;
+
+    if (!chart->uvs || chart->vertex_count == 0) return;
+    for (step = 0; step < 12; ++step) {
+        float angle = step * (float)M_PI / 12.0f;
+        float cs = cosf(angle), sn = sinf(angle);
+        float min_u = FLT_MAX, min_v = FLT_MAX, max_u = -FLT_MAX, max_v = -FLT_MAX;
+        for (size_t i = 0; i < chart->vertex_count; ++i) {
+            float u = chart->uvs[i].x - chart->uv_min.x;
+            float v = chart->uvs[i].y - chart->uv_min.y;
+            float ru = cs*u - sn*v;
+            float rv = sn*u + cs*v;
+            if (ru < min_u) min_u = ru;
+            if (rv < min_v) min_v = rv;
+            if (ru > max_u) max_u = ru;
+            if (rv > max_v) max_v = rv;
+        }
+        float area = (max_u - min_u) * (max_v - min_v);
+        if (area < best_area) {
+            best_area = area;
+            best_angle = angle;
+            best_min = (geomlib_vec2){min_u, min_v};
+            best_max = (geomlib_vec2){max_u, max_v};
+        }
+    }
+    {
+        float cs = cosf(best_angle), sn = sinf(best_angle);
+        for (size_t i = 0; i < chart->vertex_count; ++i) {
+            float u = chart->uvs[i].x - chart->uv_min.x;
+            float v = chart->uvs[i].y - chart->uv_min.y;
+            chart->uvs[i].x = cs*u - sn*v - best_min.x;
+            chart->uvs[i].y = sn*u + cs*v - best_min.y;
+        }
+    }
+    chart->uv_min = (geomlib_vec2){0, 0};
+    chart->uv_max = (geomlib_vec2){best_max.x - best_min.x, best_max.y - best_min.y};
+}
+
+typedef struct { float x, y, w, h; } free_rect;
+
+#define GEOMLIB_ATLAS_MAX_FREE 4096
+
+static void split_free_rect(free_rect *free_rects, size_t *count,
+                            const free_rect *used, float gutter)
+{
+    free_rect result[GEOMLIB_ATLAS_MAX_FREE];
+    size_t n = 0, i;
+    for (i = 0; i < *count && n < GEOMLIB_ATLAS_MAX_FREE; ++i) {
+        free_rect f = free_rects[i];
+        float fx2 = f.x + f.w, fy2 = f.y + f.h;
+        float ux2 = used->x + used->w, uy2 = used->y + used->h;
+        free_rect r;
+        if (used->x >= fx2 || ux2 <= f.x || used->y >= fy2 || uy2 <= f.y) {
+            result[n++] = f;
+            continue;
+        }
+        if (used->x > f.x) {
+            r = (free_rect){f.x, f.y, used->x - f.x - gutter, f.h};
+            if (r.w > 0.0f && n < GEOMLIB_ATLAS_MAX_FREE) result[n++] = r;
+        }
+        if (ux2 < fx2) {
+            r = (free_rect){ux2 + gutter, f.y, fx2 - ux2 - gutter, f.h};
+            if (r.w > 0.0f && n < GEOMLIB_ATLAS_MAX_FREE) result[n++] = r;
+        }
+        if (used->y > f.y) {
+            r = (free_rect){f.x, f.y, f.w, used->y - f.y - gutter};
+            if (r.h > 0.0f && n < GEOMLIB_ATLAS_MAX_FREE) result[n++] = r;
+        }
+        if (uy2 < fy2) {
+            r = (free_rect){f.x, uy2 + gutter, f.w, fy2 - uy2 - gutter};
+            if (r.h > 0.0f && n < GEOMLIB_ATLAS_MAX_FREE) result[n++] = r;
+        }
+    }
+    memcpy(free_rects, result, n * sizeof(free_rect));
+    *count = n;
+}
+
+/* MaxRects best-short-side-fit packing. */
+static int pack_charts_maxrects(geomlib_atlas *atlas,
+                                const geomlib_atlas_params *params)
+{
+    free_rect *free_rects = (free_rect *)malloc(GEOMLIB_ATLAS_MAX_FREE * sizeof(free_rect));
+    size_t count = 0;
+    float gutter = params->gutter_width;
+
+    if (!free_rects) return GEOMLIB_MESH_ERROR_MEMORY;
+    free_rects[count++] = (free_rect){0, 0, 1.0f, 1.0f};
+
+    for (size_t c = 0; c < atlas->chart_count; ++c) {
+        geomlib_atlas_chart *chart = &atlas->charts[c];
+        float w = chart->uv_max.x - chart->uv_min.x + gutter;
+        float h = chart->uv_max.y - chart->uv_min.y + gutter;
+        size_t best = count, i;
+        float best_score = FLT_MAX;
+        for (i = 0; i < count; ++i) {
+            if (free_rects[i].w < w || free_rects[i].h < h) continue;
+            float short_side = free_rects[i].w - w < free_rects[i].h - h
+                ? free_rects[i].w - w : free_rects[i].h - h;
+            if (short_side < best_score) { best_score = short_side; best = i; }
+        }
+        if (best == count) {
+            /* No rectangle is large enough: shrink into the largest free one. */
+            size_t largest = 0;
+            for (i = 1; i < count; ++i) {
+                if (free_rects[i].w * free_rects[i].h >
+                    free_rects[largest].w * free_rects[largest].h) largest = i;
+            }
+            if (count == 0) { chart->atlas_offset = (geomlib_vec2){0,0}; continue; }
+            float scale = free_rects[largest].w / w;
+            float sy = free_rects[largest].h / h;
+            if (sy < scale) scale = sy;
+            if (scale > 1.0f) scale = 1.0f;
+            chart->atlas_scale = (geomlib_vec2){scale, scale};
+            chart->atlas_offset = (geomlib_vec2){free_rects[largest].x,
+                                                  free_rects[largest].y};
+            free_rect used = (free_rect){free_rects[largest].x, free_rects[largest].y,
+                                         w * scale, h * scale};
+            split_free_rect(free_rects, &count, &used, gutter);
+            continue;
+        }
+        {
+            free_rect used = (free_rect){free_rects[best].x, free_rects[best].y, w, h};
+            chart->atlas_offset = (geomlib_vec2){used.x, used.y};
+            chart->atlas_scale = (geomlib_vec2){1, 1};
+            split_free_rect(free_rects, &count, &used, gutter);
+        }
+    }
+    free(free_rects);
+    return GEOMLIB_MESH_SUCCESS;
+}
+
+/* Guillotine packing: place into the first fitting free rectangle, then split. */
+static int pack_charts_guillotine(geomlib_atlas *atlas,
+                                  const geomlib_atlas_params *params)
+{
+    free_rect *free_rects = (free_rect *)malloc(GEOMLIB_ATLAS_MAX_FREE * sizeof(free_rect));
+    size_t count = 0;
+    float gutter = params->gutter_width;
+    if (!free_rects) return GEOMLIB_MESH_ERROR_MEMORY;
+    free_rects[count++] = (free_rect){0, 0, 1.0f, 1.0f};
+
+    for (size_t c = 0; c < atlas->chart_count; ++c) {
+        geomlib_atlas_chart *chart = &atlas->charts[c];
+        float w = chart->uv_max.x - chart->uv_min.x + gutter;
+        float h = chart->uv_max.y - chart->uv_min.y + gutter;
+        size_t chosen = count, i;
+        for (i = 0; i < count; ++i) {
+            if (free_rects[i].w >= w && free_rects[i].h >= h) { chosen = i; break; }
+        }
+        if (chosen == count) {
+            size_t largest = 0;
+            for (i = 1; i < count; ++i) {
+                if (free_rects[i].w * free_rects[i].h >
+                    free_rects[largest].w * free_rects[largest].h) largest = i;
+            }
+            if (count == 0) { chart->atlas_offset = (geomlib_vec2){0,0}; continue; }
+            float scale = free_rects[largest].w / w;
+            float sy = free_rects[largest].h / h;
+            if (sy < scale) scale = sy;
+            if (scale > 1.0f) scale = 1.0f;
+            chart->atlas_scale = (geomlib_vec2){scale, scale};
+            chart->atlas_offset = (geomlib_vec2){free_rects[largest].x,
+                                                  free_rects[largest].y};
+            continue;
+        }
+        {
+            free_rect f = free_rects[chosen];
+            chart->atlas_offset = (geomlib_vec2){f.x, f.y};
+            chart->atlas_scale = (geomlib_vec2){1, 1};
+            /* Remove the chosen rectangle and append the two guillotine cuts. */
+            for (i = chosen; i + 1 < count; ++i) free_rects[i] = free_rects[i+1];
+            count--;
+            if (f.w - w > gutter && count < GEOMLIB_ATLAS_MAX_FREE)
+                free_rects[count++] = (free_rect){f.x + w + gutter, f.y, f.w - w - gutter, f.h};
+            if (f.h - h > gutter && count < GEOMLIB_ATLAS_MAX_FREE)
+                free_rects[count++] = (free_rect){f.x, f.y + h + gutter, f.w, f.h - h - gutter};
+        }
+    }
+    free(free_rects);
+    return GEOMLIB_MESH_SUCCESS;
+}
+
 /* Pack charts into atlas */
 int geomlib_atlas_pack_charts(
     geomlib_atlas *atlas,
@@ -359,7 +674,15 @@ int geomlib_atlas_pack_charts(
 ) {
     if (!atlas || !params) return GEOMLIB_MESH_ERROR_INVALID;
 
+    if (params->optimize_rotation) {
+        for (size_t c = 0; c < atlas->chart_count; ++c)
+            optimize_chart_rotation(&atlas->charts[c]);
+    }
     switch (params->packing) {
+        case GEOMLIB_ATLAS_PACK_MAXRECTS:
+            return pack_charts_maxrects(atlas, params);
+        case GEOMLIB_ATLAS_PACK_GUILLOTINE:
+            return pack_charts_guillotine(atlas, params);
         case GEOMLIB_ATLAS_PACK_SHELF:
         default:
             return pack_charts_shelf(atlas, params);
@@ -404,15 +727,22 @@ void geomlib_atlas_compute_stats(
 ) {
     if (!mesh || !atlas) return;
 
-    /* Compute coverage */
-    float used_area = 0.0f;
+    /* Coverage = packed chart area / atlas bounding area, as a percentage. */
+    float used_area = 0.0f, extent_x = 0.0f, extent_y = 0.0f;
     for (size_t c = 0; c < atlas->chart_count; c++) {
         const geomlib_atlas_chart *chart = &atlas->charts[c];
-        float w = chart->uv_max.x - chart->uv_min.x;
-        float h = chart->uv_max.y - chart->uv_min.y;
+        float w = (chart->uv_max.x - chart->uv_min.x) * chart->atlas_scale.x;
+        float h = (chart->uv_max.y - chart->uv_min.y) * chart->atlas_scale.y;
         used_area += w * h;
+        float x2 = chart->atlas_offset.x + w;
+        float y2 = chart->atlas_offset.y + h;
+        if (x2 > extent_x) extent_x = x2;
+        if (y2 > extent_y) extent_y = y2;
     }
-    atlas->coverage = used_area * 100.0f;
+    if (extent_x > 0.0f && extent_y > 0.0f)
+        atlas->coverage = 100.0f * used_area / (extent_x * extent_y);
+    else
+        atlas->coverage = 0.0f;
 
     /* Compute stretch: normalized UV-to-3D edge-length ratios. */
     double total_3d_area = 0.0, total_uv_area = 0.0;

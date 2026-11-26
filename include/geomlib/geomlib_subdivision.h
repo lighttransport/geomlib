@@ -19,6 +19,7 @@ extern "C" {
 typedef enum geomlib_subdivision_scheme {
     GEOMLIB_SUBDIV_LOOP,          /* Loop subdivision (triangles) */
     GEOMLIB_SUBDIV_BUTTERFLY,     /* Butterfly subdivision (interpolating) */
+    GEOMLIB_SUBDIV_CATMULL_CLARK, /* Catmull-Clark (quadrilateral refinement) */
     GEOMLIB_SUBDIV_MIDPOINT       /* Simple midpoint subdivision */
 } geomlib_subdivision_scheme;
 
@@ -60,6 +61,13 @@ int geomlib_subdivide_loop(
  * extraordinary vertex use Zorin's extraordinary masks, and boundary edges use
  * the linear midpoint. */
 int geomlib_subdivide_butterfly(
+    const geomlib_trimesh *input,
+    geomlib_trimesh *output
+);
+
+/* Catmull-Clark subdivision (one level). Faces are triangulated after the
+ * quad split; boundary vertices use the standard crease rule. */
+int geomlib_subdivide_catmull_clark(
     const geomlib_trimesh *input,
     geomlib_trimesh *output
 );

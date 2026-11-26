@@ -91,6 +91,24 @@ int geomlib_parameterize_harmonic(
     geomlib_uv_coords *uvs
 );
 
+/* ARAP parameterization (Liu et al. 2008 local/global solver).
+ * Boundary vertices are pinned to a circle (or square). */
+int geomlib_parameterize_arap(
+    const geomlib_trimesh *mesh,
+    geomlib_boundary_shape boundary,
+    int max_iterations,
+    geomlib_uv_coords *uvs
+);
+
+/* LSCM with a free boundary: only two vertices are pinned (at (0,0) and
+ * (1,0)), all other boundary vertices are solved for. */
+int geomlib_parameterize_lscm_free(
+    const geomlib_trimesh *mesh,
+    uint32_t pin_vertex_0,
+    uint32_t pin_vertex_1,
+    geomlib_uv_coords *uvs
+);
+
 /* Helper: Find boundary loop of mesh */
 int geomlib_find_boundary_loop(
     const geomlib_trimesh *mesh,

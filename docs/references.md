@@ -18,7 +18,8 @@ This document contains academic papers, algorithms, and technical resources used
 - Year: 2013
 - Conference: ACM Transactions on Graphics (SIGGRAPH)
 - Description: Robust methods for determining inside/outside classification using winding numbers
-- Used in: `geomlib_healing.c` - Ray casting for orientation detection
+- Used in: `geomlib_sdf.c` - generalized winding number; `geomlib_healing.c`
+  uses ray casting rather than winding numbers.
 
 **Surface Reconstruction from Unorganized Points**
 - Authors: Hoppe et al.
@@ -34,7 +35,9 @@ This document contains academic papers, algorithms, and technical resources used
 - Year: 2006
 - Conference: Eurographics Symposium on Geometry Processing
 - Description: Implicit surface reconstruction using Poisson equation
-- Influence: Marching cubes implementation in `geomlib_surface.c`
+- Influence: the oriented-point implicit field in `geomlib_surface.c` is
+  conceptually related, but geomlib does not implement a Poisson solver.
+  Screened Poisson reconstruction is a planned future algorithm.
 
 **Greedy Projection Triangulation**
 - Description: Fast triangulation method for point clouds
@@ -47,7 +50,9 @@ This document contains academic papers, algorithms, and technical resources used
 - Year: 2004
 - Conference: Eurographics/ACM SIGGRAPH Symposium on Geometry Processing (SGP)
 - Description: The foundational incremental remeshing algorithm using edge split, collapse, flip, and tangential smoothing
-- Used in: `geomlib_remeshing.c` - Complete implementation
+- Used in: `geomlib_remeshing.c` - split/collapse/flip and tangential smoothing;
+  surface projection uses a BVH closest-point query (Wave 0). Adaptive sizing
+  is still a local normal-variation heuristic.
 - URL: https://www.pmp-library.org/remeshing.html
 
 **Polygon Mesh Processing Library - Remeshing**

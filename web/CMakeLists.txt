@@ -14,35 +14,16 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Source files from parent directory
-set(GEOMLIB_SOURCES
-    ../src/geomlib_linalg.c
-    ../src/geomlib_solver.c
-    ../src/geomlib_mesh.c
-    ../src/geomlib_random.c
-    ../src/geomlib_montecarlo.c
-    ../src/geomlib_bvh.c
-    ../src/geomlib_collision.c
-    ../src/geomlib_surface.c
-    ../src/geomlib_healing.c
-    ../src/geomlib_remeshing.c
-    ../src/geomlib_parameterization.c
-    ../src/geomlib_curvature.c
-    ../src/geomlib_geodesic.c
-    ../src/geomlib_decimation.c
-    ../src/geomlib_smoothing.c
-    ../src/geomlib_quality.c
-    ../src/geomlib_subdivision.c
-    ../src/geomlib_atlas.c
-    ../src/geomlib_tetramesh.c
-    ../src/geomlib_cfd.c
-    ../src/geomlib_optimize.c
-    ../src/geomlib_topology.c
-    ../src/geomlib_statistics.c
-    ../src/geomlib_holefill.c
-    ../src/geomlib_feature.c
-    ../src/geomlib_sdf.c
-)
+# Strict C11 for the core, matching the native build.
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
+
+option(GEOMLIB_STRICT_C11 "Compile the C core with -pedantic -Werror" OFF)
+
+# Shared source list (identical to the native build).
+set(GEOMLIB_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/..)
+include(${GEOMLIB_ROOT}/cmake/geomlib_sources.cmake)
 
 # WebAssembly binding
 set(BINDING_SOURCE
@@ -55,6 +36,10 @@ add_executable(geomlib-wasm ${GEOMLIB_SOURCES} ${BINDING_SOURCE})
 target_include_directories(geomlib-wasm PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
+
+if(GEOMLIB_STRICT_C11)
+    target_compile_options(geomlib-wasm PRIVATE -pedantic -Wall -Wextra -Werror)
+endif()
 
 # Emscripten-specific settings
 set(EMSCRIPTEN_LINK_FLAGS

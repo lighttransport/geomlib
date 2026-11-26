@@ -14,6 +14,11 @@ emmake make
 # This will generate geomlib.js and geomlib.wasm in demo/public/
 ```
 
+New foundational bindings are available: `loadMeshFromString(text, format)`
+and `saveMeshToString(mesh, format)` for in-memory OBJ/OFF/PLY/STL I/O (no
+filesystem needed), plus `predOrient2d`, `predOrient3d`, `predInCircle` and
+`predInSphere` for exact geometric predicates.
+
 The module is built with `-sENVIRONMENT=web,node`, so the same artifact can be
 exercised headlessly:
 

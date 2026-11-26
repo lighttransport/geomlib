@@ -58,6 +58,10 @@ cd build/tests
 ./test_bvh         # BVH and ray tracing tests
 ```
 
+The suite now has 27 registered tests, including `test_predicates`,
+`test_sparse`, `test_io` and `test_distance`. WebAssembly builds are configured
+with `./scripts/configure.sh --wasm` and checked with `node web/smoke.mjs`.
+
 ## Architecture
 
 ### Core Design Principles
@@ -66,7 +70,12 @@ cd build/tests
 - **No external dependencies** - custom linear algebra (no Eigen or similar libraries)
 - **Column-major matrices** - following OpenGL convention
 
-### Six-Module Architecture
+### Module Architecture
+
+> **Note:** The original "six-module" description below is historical. The
+> library now has 30+ public modules; see `include/geomlib/geomlib.h` for the
+> authoritative list and `cmake/geomlib_sources.cmake` for the shared source
+> list used by both native and WebAssembly builds.
 
 **1. Linear Algebra (`geomlib_linalg.h` / `geomlib_linalg.c`)**
 - Fundamental data types: `geomlib_vec2/3/4`, `geomlib_mat3/4`

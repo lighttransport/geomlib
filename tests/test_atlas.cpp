@@ -57,6 +57,47 @@ int main() {
     geomlib_atlas_free(&atlas);
     geomlib_trimesh_free(&stretched);
 
+    /* Wave 1: full atlas pipeline with all segmentation and packing modes. */
+    {
+        geomlib_trimesh bent;
+        geomlib_trimesh_init(&bent, 6, 4);
+        /* Two planar patches meeting at a right angle along x = 1. */
+        const geomlib_vec3 p[6] = {
+            {0,0,0},{1,0,0},{1,1,0},{0,1,0},{1,0,-1},{1,1,-1}
+        };
+        for (int i = 0; i < 6; ++i)
+            geomlib_trimesh_add_vertex(&bent, p[i], nullptr, nullptr);
+        geomlib_trimesh_add_triangle(&bent, 0, 1, 2);
+        geomlib_trimesh_add_triangle(&bent, 0, 2, 3);
+        geomlib_trimesh_add_triangle(&bent, 1, 4, 5);
+        geomlib_trimesh_add_triangle(&bent, 1, 5, 2);
+
+        const geomlib_atlas_segmentation segs[] = {
+            GEOMLIB_ATLAS_SEG_PLANARITY, GEOMLIB_ATLAS_SEG_DISTORTION
+        };
+        const geomlib_atlas_packing packs[] = {
+            GEOMLIB_ATLAS_PACK_SHELF, GEOMLIB_ATLAS_PACK_MAXRECTS,
+            GEOMLIB_ATLAS_PACK_GUILLOTINE
+        };
+        for (int s = 0; s < 2; ++s) {
+            for (int k = 0; k < 3; ++k) {
+                geomlib_atlas_params params = geomlib_atlas_params_default();
+                params.segmentation = segs[s];
+                params.packing = packs[k];
+                params.parameterization = GEOMLIB_PARAM_HARMONIC;
+                params.optimize_rotation = true;
+                geomlib_atlas a = {};
+                a.charts = (geomlib_atlas_chart*)calloc(256, sizeof(geomlib_atlas_chart));
+                CHECK(geomlib_generate_atlas(&bent, &params, &a) == GEOMLIB_MESH_SUCCESS,
+                      "atlas pipeline succeeds");
+                CHECK(a.chart_count >= 1 && a.chart_count <= 256, "chart count in range");
+                CHECK(a.coverage > 0.0f && a.coverage <= 100.0f, "coverage is a percentage");
+                geomlib_atlas_free(&a);
+            }
+        }
+        geomlib_trimesh_free(&bent);
+    }
+
     std::printf("\n=== ALL TESTS PASSED ===\n");
     return 0;
 }

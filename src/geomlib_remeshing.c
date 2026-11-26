@@ -5,6 +5,7 @@
 
 #include "geomlib/geomlib_remeshing.h"
 #include "geomlib/geomlib_healing.h"
+#include "geomlib/geomlib_bvh.h"
 #include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
@@ -446,11 +447,25 @@ int geomlib_remesh(
         is_feature = detect_features(mesh, &hemesh, params->feature_angle);
     }
 
-    /* Store original vertex positions for projection */
-    geomlib_vec3 *original_positions = NULL;
+    /* Keep a copy of the original surface with a BVH so projection finds the
+     * closest *surface point*, not the closest original vertex. */
+    geomlib_trimesh original_mesh = {0};
+    geomlib_bvh original_bvh = {0};
+    bool have_original_bvh = false;
     if (params->project_to_surface) {
-        original_positions = malloc(mesh->vertex_count * sizeof(geomlib_vec3));
-        memcpy(original_positions, mesh->vertices, mesh->vertex_count * sizeof(geomlib_vec3));
+        if (geomlib_trimesh_init(&original_mesh, mesh->vertex_count,
+                                 mesh->triangle_count) != GEOMLIB_MESH_SUCCESS) {
+            geomlib_halfedge_free(&hemesh);
+            return GEOMLIB_MESH_ERROR_MEMORY;
+        }
+        memcpy(original_mesh.vertices, mesh->vertices,
+               mesh->vertex_count * sizeof(geomlib_vec3));
+        memcpy(original_mesh.indices, mesh->indices,
+               mesh->triangle_count * 3 * sizeof(uint32_t));
+        original_mesh.vertex_count = mesh->vertex_count;
+        original_mesh.triangle_count = mesh->triangle_count;
+        geomlib_bvh_build(&original_bvh, &original_mesh, GEOMLIB_BVH_QUALITY_MEDIUM);
+        have_original_bvh = true;
     }
 
     /* Main remeshing loop */
@@ -550,28 +565,15 @@ int geomlib_remesh(
         }
 
         /* 4. Project to surface (if enabled) */
-        if (params->project_to_surface && original_positions) {
-            /* Simple closest point projection (can be improved with BVH) */
+        if (have_original_bvh) {
             for (size_t v = 0; v < mesh->vertex_count; v++) {
                 if (is_feature && is_feature[v]) continue;
-
-                /* Find closest original vertex (very simple projection) */
-                float min_dist = FLT_MAX;
-                geomlib_vec3 closest = mesh->vertices[v];
-
-                for (size_t ov = 0; ov < mesh->vertex_count && ov < 100; ov++) {
-                    geomlib_vec3 diff = geomlib_vec3_sub(mesh->vertices[v], original_positions[ov]);
-                    float dist = geomlib_vec3_length(diff);
-                    if (dist < min_dist) {
-                        min_dist = dist;
-                        closest = original_positions[ov];
-                    }
+                geomlib_vec3 closest;
+                float distance;
+                if (geomlib_bvh_closest_point(&original_bvh, mesh->vertices[v],
+                                              &closest, &distance, NULL)) {
+                    mesh->vertices[v] = closest;
                 }
-
-                /* Blend with closest point */
-                mesh->vertices[v] = geomlib_vec3_mul(
-                    geomlib_vec3_add(mesh->vertices[v], closest), 0.5f
-                );
             }
         }
 
@@ -584,7 +586,10 @@ int geomlib_remesh(
     /* Cleanup */
     geomlib_halfedge_free(&hemesh);
     if (is_feature) free(is_feature);
-    if (original_positions) free(original_positions);
+    if (have_original_bvh) {
+        geomlib_bvh_free(&original_bvh);
+        geomlib_trimesh_free(&original_mesh);
+    }
 
     /* Recompute normals */
     geomlib_trimesh_compute_normals(mesh);

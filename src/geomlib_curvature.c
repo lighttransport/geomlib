@@ -142,7 +142,6 @@ int geomlib_compute_mean_curvature(
     for (size_t v = 0; v < mesh->vertex_count; v++) {
         geomlib_vec3 vertex = mesh->vertices[v];
         geomlib_vec3 laplacian = {0.0f, 0.0f, 0.0f};
-        float weight_sum = 0.0f;
 
         /* Find all one-ring neighbors and compute cotan-weighted Laplacian */
         for (size_t he_idx = 0; he_idx < hemesh.halfedge_count; he_idx++) {
@@ -159,7 +158,6 @@ int geomlib_compute_mean_curvature(
             uint32_t twin = hemesh.halfedges[he_idx].twin;
 
             float cotan_sum = 0.0f;
-            int cotan_count = 0;
 
             /* Cotan from current face */
             if (face != UINT32_MAX) {
@@ -175,7 +173,6 @@ int geomlib_compute_mean_curvature(
                 geomlib_vec3 opp = mesh->vertices[opposite];
                 float cotan = geomlib_cotan_weight(&vertex, &neighbor, &opp);
                 cotan_sum += cotan;
-                cotan_count++;
             }
 
             /* Cotan from twin face */
@@ -193,7 +190,6 @@ int geomlib_compute_mean_curvature(
                     geomlib_vec3 opp = mesh->vertices[opposite];
                     float cotan = geomlib_cotan_weight(&vertex, &neighbor, &opp);
                     cotan_sum += cotan;
-                    cotan_count++;
                 }
             }
 
@@ -201,7 +197,6 @@ int geomlib_compute_mean_curvature(
             geomlib_vec3 edge = geomlib_vec3_sub(neighbor, vertex);
             geomlib_vec3 weighted = geomlib_vec3_mul(edge, cotan_sum);
             laplacian = geomlib_vec3_add(laplacian, weighted);
-            weight_sum += cotan_sum;
         }
 
         /* Mean curvature H = |Laplacian| / (2 * area) */

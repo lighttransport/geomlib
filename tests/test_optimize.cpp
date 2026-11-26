@@ -229,6 +229,48 @@ static int test_reorder_vertices() {
     return 0;
 }
 
+static void sorted_triple(const geomlib_trimesh *m, size_t t, uint32_t out[3]) {
+    out[0] = m->indices[t*3]; out[1] = m->indices[t*3+1]; out[2] = m->indices[t*3+2];
+    for (int p = 0; p < 3; ++p)
+        for (int q = p+1; q < 3; ++q)
+            if (out[p] > out[q]) { uint32_t s=out[p]; out[p]=out[q]; out[q]=s; }
+}
+
+static int test_vcache_algorithms() {
+    geomlib_trimesh mesh = {};
+    geomlib_create_sphere(&mesh, 1.0f, 16, 8);
+    for (int alg = 0; alg < 3; ++alg) {
+        geomlib_trimesh copy = {};
+        geomlib_trimesh_init(&copy, mesh.vertex_count, mesh.triangle_count);
+        for (size_t i = 0; i < mesh.vertex_count; ++i)
+            geomlib_trimesh_add_vertex(&copy, mesh.vertices[i], nullptr, nullptr);
+        for (size_t i = 0; i < mesh.triangle_count; ++i)
+            geomlib_trimesh_add_triangle(&copy, mesh.indices[i*3], mesh.indices[i*3+1],
+                                         mesh.indices[i*3+2]);
+        TEST_ASSERT(geomlib_optimize_vertex_cache(
+            &copy, static_cast<geomlib_vcache_algorithm>(alg), 16) == GEOMLIB_MESH_SUCCESS,
+            "vertex cache algorithm succeeds");
+        TEST_ASSERT(copy.triangle_count == mesh.triangle_count,
+            "vertex cache optimization preserves triangle count");
+        bool all_present = true;
+        for (size_t i = 0; i < copy.triangle_count; ++i) {
+            uint32_t c[3];
+            sorted_triple(&copy, i, c);
+            bool found = false;
+            for (size_t j = 0; j < mesh.triangle_count; ++j) {
+                uint32_t o[3];
+                sorted_triple(&mesh, j, o);
+                if (c[0]==o[0] && c[1]==o[1] && c[2]==o[2]) { found = true; break; }
+            }
+            if (!found) { all_present = false; break; }
+        }
+        TEST_ASSERT(all_present, "vertex cache preserves the triangle set");
+        geomlib_trimesh_free(&copy);
+    }
+    geomlib_trimesh_free(&mesh);
+    return 0;
+}
+
 int main() {
     printf("=== Mesh Optimization Tests ===\n\n");
 
@@ -239,6 +281,7 @@ int main() {
     failures += test_reorder_vertices();
     failures += test_compression_sphere();
     failures += test_strips_sphere();
+    failures += test_vcache_algorithms();
 
     printf("\n");
     if (failures == 0) {

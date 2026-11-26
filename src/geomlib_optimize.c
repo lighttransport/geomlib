@@ -356,6 +356,151 @@ static int geomlib_optimize_forsyth(
     return GEOMLIB_MESH_SUCCESS;
 }
 
+/* Tipsify: traverse the triangle adjacency graph, staying in cache as long
+ * as possible. Implements the standard live-triangle/FIFO strategy. */
+static int geomlib_optimize_tipsify(
+    const geomlib_trimesh *mesh,
+    uint32_t *new_indices,
+    uint32_t cache_size
+) {
+    size_t V = mesh->vertex_count, T = mesh->triangle_count;
+    size_t *vtri_count, *vtri_fill, *vtri;
+    uint32_t *live, *stamp;
+    uint8_t *emitted;
+    uint32_t *fifo;
+    size_t nfifo = 0;
+    uint32_t time = cache_size + 1;
+    size_t written = 0, i, k;
+
+    vtri_count = (size_t *)calloc(V + 1, sizeof(size_t));
+    live = (uint32_t *)calloc(V ? V : 1, sizeof(uint32_t));
+    stamp = (uint32_t *)calloc(V ? V : 1, sizeof(uint32_t));
+    emitted = (uint8_t *)calloc(T ? T : 1, sizeof(uint8_t));
+    fifo = (uint32_t *)malloc(3 * T * sizeof(uint32_t) + 4);
+    vtri = (size_t *)malloc(3 * T * sizeof(size_t) + 4);
+    if (!vtri_count || !live || !stamp || !emitted || !fifo || !vtri) {
+        free(vtri_count); free(live); free(stamp); free(emitted); free(fifo); free(vtri);
+        return GEOMLIB_MESH_ERROR_MEMORY;
+    }
+    for (i = 0; i < T; ++i) {
+        for (k = 0; k < 3; ++k) vtri_count[mesh->indices[i*3+k] + 1]++;
+    }
+    for (i = 0; i < V; ++i) vtri_count[i+1] += vtri_count[i];
+    vtri_fill = (size_t *)calloc(V ? V : 1, sizeof(size_t));
+    if (!vtri_fill) {
+        free(vtri_count); free(live); free(stamp); free(emitted); free(fifo); free(vtri);
+        return GEOMLIB_MESH_ERROR_MEMORY;
+    }
+    for (i = 0; i < T; ++i) {
+        for (k = 0; k < 3; ++k) {
+            uint32_t v = mesh->indices[i*3+k];
+            vtri[vtri_count[v] + vtri_fill[v]++] = i;
+        }
+    }
+    for (i = 0; i < V; ++i) live[i] = (uint32_t)(vtri_count[i+1] - vtri_count[i]);
+
+    while (written < T) {
+        size_t current = (size_t)-1;
+        /* Pick a live vertex as a restart point if the FIFO is empty. */
+        if (nfifo == 0) {
+            size_t best_v = (size_t)-1;
+            uint32_t best_live = 0;
+            for (i = 0; i < V; ++i) {
+                if (live[i] > best_live) { best_live = live[i]; best_v = i; }
+            }
+            if (best_v != (size_t)-1) {
+                for (i = vtri_count[best_v]; i < vtri_count[best_v+1]; ++i) {
+                    if (!emitted[vtri[i]]) { current = vtri[i]; break; }
+                }
+            }
+            if (current == (size_t)-1) {
+                for (i = 0; i < T; ++i) if (!emitted[i]) { current = i; break; }
+            }
+        } else {
+            while (nfifo > 0) {
+                uint32_t v = fifo[--nfifo];
+                if (stamp[v] + cache_size > time) {
+                    /* Vertex is still cached: prefer a neighbour using it. */
+                    size_t best = (size_t)-1;
+                    int best_score = -1;
+                    for (i = vtri_count[v]; i < vtri_count[v+1]; ++i) {
+                        size_t t = vtri[i];
+                        int score = 0;
+                        if (emitted[t]) continue;
+                        for (k = 0; k < 3; ++k) {
+                            uint32_t w = mesh->indices[t*3+k];
+                            if (stamp[w] + cache_size > time) score++;
+                        }
+                        if (score > best_score) { best_score = score; best = t; }
+                    }
+                    if (best != (size_t)-1) { current = best; break; }
+                } else if (live[v] > 0) {
+                    for (i = vtri_count[v]; i < vtri_count[v+1]; ++i) {
+                        if (!emitted[vtri[i]]) { current = vtri[i]; break; }
+                    }
+                    if (current != (size_t)-1) break;
+                }
+            }
+            if (current == (size_t)-1) {
+                for (i = 0; i < T; ++i) if (!emitted[i]) { current = i; break; }
+            }
+        }
+
+        emitted[current] = 1;
+        for (k = 0; k < 3; ++k) {
+            uint32_t v = mesh->indices[current*3+k];
+            new_indices[written*3+k] = v;
+            if (live[v] > 0) live[v]--;
+            stamp[v] = time++;
+            if (live[v] > 0 && nfifo < 3 * T) fifo[nfifo++] = v;
+        }
+        written++;
+    }
+
+    free(vtri_count); free(vtri_fill); free(vtri);
+    free(live); free(stamp); free(emitted); free(fifo);
+    return GEOMLIB_MESH_SUCCESS;
+}
+
+/* Simple greedy: at each step pick the unemitted triangle with the most
+ * corners currently in the cache. O(T^2) but deterministic and robust. */
+static int geomlib_optimize_simple(
+    const geomlib_trimesh *mesh,
+    uint32_t *new_indices,
+    uint32_t cache_size
+) {
+    size_t T = mesh->triangle_count, written = 0, i, k;
+    uint8_t *emitted = (uint8_t *)calloc(T ? T : 1, sizeof(uint8_t));
+    uint32_t *stamp = (uint32_t *)calloc(mesh->vertex_count ? mesh->vertex_count : 1,
+                                         sizeof(uint32_t));
+    uint32_t time = cache_size + 1;
+    if (!emitted || !stamp) { free(emitted); free(stamp); return GEOMLIB_MESH_ERROR_MEMORY; }
+    while (written < T) {
+        size_t best = (size_t)-1;
+        int best_score = -1;
+        for (i = 0; i < T; ++i) {
+            int score = 0;
+            if (emitted[i]) continue;
+            for (k = 0; k < 3; ++k) {
+                uint32_t v = mesh->indices[i*3+k];
+                if (stamp[v] + cache_size > time) score++;
+            }
+            if (score > best_score) { best_score = score; best = i; }
+            if (score == 3) break;
+        }
+        if (best == (size_t)-1) break;
+        emitted[best] = 1;
+        for (k = 0; k < 3; ++k) {
+            uint32_t v = mesh->indices[best*3+k];
+            new_indices[written*3+k] = v;
+            stamp[v] = time++;
+        }
+        written++;
+    }
+    free(emitted); free(stamp);
+    return GEOMLIB_MESH_SUCCESS;
+}
+
 int geomlib_optimize_indices(
     const geomlib_trimesh *mesh,
     uint32_t *new_indices,
@@ -369,6 +514,10 @@ int geomlib_optimize_indices(
     switch (algorithm) {
         case GEOMLIB_VCACHE_FORSYTH:
             return geomlib_optimize_forsyth(mesh, new_indices, cache_size);
+        case GEOMLIB_VCACHE_TIPSIFY:
+            return geomlib_optimize_tipsify(mesh, new_indices, cache_size);
+        case GEOMLIB_VCACHE_SIMPLE:
+            return geomlib_optimize_simple(mesh, new_indices, cache_size);
         default:
             return GEOMLIB_MESH_ERROR_INVALID;
     }

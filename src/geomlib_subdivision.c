@@ -490,7 +490,9 @@ static int subdivide_loop_internal(
         uint32_t v0 = input->indices[t * 3 + 0];
         uint32_t v1 = input->indices[t * 3 + 1];
         uint32_t v2 = input->indices[t * 3 + 2];
-        uint32_t e01, e12, e20;
+        /* All triangle edges were inserted into the map in step 2. Initialize
+         * defensively so strict builds do not report maybe-uninitialized. */
+        uint32_t e01 = 0, e12 = 0, e20 = 0;
         edge_map_get(&emap, make_edge_key(v0, v1), &e01);
         edge_map_get(&emap, make_edge_key(v1, v2), &e12);
         edge_map_get(&emap, make_edge_key(v2, v0), &e20);
@@ -783,6 +785,9 @@ int geomlib_subdivide_mesh(
                 break;
             case GEOMLIB_SUBDIV_BUTTERFLY:
                 result = geomlib_subdivide_butterfly(current, next);
+                break;
+            case GEOMLIB_SUBDIV_CATMULL_CLARK:
+                result = geomlib_subdivide_catmull_clark(current, next);
                 break;
             case GEOMLIB_SUBDIV_MIDPOINT:
                 result = geomlib_subdivide_midpoint(current, next);

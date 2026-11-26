@@ -11,14 +11,22 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# C11 for C sources
+# Strict C11 for C sources (no GNU extensions). The web build mirrors these
+# settings in web/CMakeLists.txt.
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
+
+option(GEOMLIB_STRICT_C11 "Compile the C core with -pedantic -Werror" OFF)
+
+# Shared source list, used by both the native and Emscripten builds.
+set(GEOMLIB_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/geomlib_sources.cmake)
 
 # Build options
 option(GEOMLIB_BUILD_TESTS "Build tests" ON)
-option(GEOMLIB_BUILD_EXAMPLES "Build examples" OFF)
 option(GEOMLIB_BUILD_BENCHMARKS "Build benchmark tools" OFF)
+# GEOMLIB_BUILD_EXAMPLES was removed: no example targets exist.
 
 # No RTTI, no exceptions
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -27,38 +35,14 @@ elseif(MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /GR- /EHsc")
 endif()
 
-# Library source files
-set(GEOMLIB_SOURCES
-    src/geomlib_linalg.c
-    src/geomlib_solver.c
-    src/geomlib_mesh.c
-    src/geomlib_random.c
-    src/geomlib_montecarlo.c
-    src/geomlib_bvh.c
-    src/geomlib_collision.c
-    src/geomlib_surface.c
-    src/geomlib_healing.c
-    src/geomlib_remeshing.c
-    src/geomlib_parameterization.c
-    src/geomlib_curvature.c
-    src/geomlib_geodesic.c
-    src/geomlib_decimation.c
-    src/geomlib_smoothing.c
-    src/geomlib_quality.c
-    src/geomlib_subdivision.c
-    src/geomlib_atlas.c
-    src/geomlib_tetramesh.c
-    src/geomlib_cfd.c
-    src/geomlib_optimize.c
-    src/geomlib_topology.c
-    src/geomlib_statistics.c
-    src/geomlib_holefill.c
-    src/geomlib_feature.c
-    src/geomlib_sdf.c
-)
-
-# Create library
+# Create library from the shared source list.
 add_library(geomlib ${GEOMLIB_SOURCES})
+
+if(GEOMLIB_STRICT_C11)
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(geomlib PRIVATE -pedantic -Wall -Wextra -Werror)
+    endif()
+endif()
 
 target_include_directories(geomlib
     PUBLIC
