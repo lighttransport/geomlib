@@ -438,6 +438,8 @@ point query instead of scanning the first 100 original vertices.
   `geomlib_circle_intersection_area` computes circle lens and union areas;
   `geomlib_polygon_intersection_area` computes convex polygon overlap area;
   `geomlib_circle_ellipse_overlap` tests circles against oriented ellipses;
+  `geomlib_geodesic_mmp` computes continuous surface geodesics;
+  `geomlib_metric3` supplies anisotropic metric tensors for remeshing;
 
 ## Clean-room process and Lean formalization
 

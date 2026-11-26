@@ -199,4 +199,6 @@ set(GEOMLIB_SOURCES
     ${GEOMLIB_ROOT}/src/geomlib_circle_area.c
     ${GEOMLIB_ROOT}/src/geomlib_polygon_intersection_area.c
     ${GEOMLIB_ROOT}/src/geomlib_circle_ellipse.c
+    ${GEOMLIB_ROOT}/src/geomlib_geodesic_mmp.c
+    ${GEOMLIB_ROOT}/src/geomlib_metric.c
 )

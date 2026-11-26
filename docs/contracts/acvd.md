@@ -18,9 +18,10 @@
 3. Triangulate the relaxed sites with the existing greedy-projection surface
    reconstruction (tangent-plane fans with edge/normal checks).
 
-This is an approximated CVT (no exact restricted Voronoi diagram or anisotropic
-metric yet); theisotropic case is implemented. Anisotropic metric tensors are
-future work.
+This is an approximated CVT (no exact restricted Voronoi diagram); the
+isotropic case is implemented. Anisotropic metric tensors are now available
+from `geomlib_metric.h` (`geomlib_metric_field_from_curvature`) for driving
+metric-dependent clustering.
 
 ## API / constraints
 

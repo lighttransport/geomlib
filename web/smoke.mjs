@@ -93,6 +93,16 @@ const boolUnion = m.meshBoolean(box, m.createSphere(0.7, 16, 8), 0);
 check(boolUnion && boolUnion.getTriangleCount() > 0,
       'mesh boolean union produces triangles in WASM');
 
+// Anisotropic metric tensor
+const met = m.metricDemo();
+check(met.success && Math.abs(met.distance - Math.sqrt(34)) < 1e-4,
+      'anisotropic metric distance is exact in WASM');
+
+// MMP continuous geodesic
+const mmp = m.geodesicMmpDemo();
+check(mmp.success && Math.abs(mmp.length - Math.sqrt(5)) < 1e-4,
+      'MMP geodesic finds the cube surface shortest path in WASM');
+
 // Circle-ellipse overlap
 const cel = m.circleEllipseDemo();
 check(cel.success && cel.distance < 0,

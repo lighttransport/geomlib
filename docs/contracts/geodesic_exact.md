@@ -14,8 +14,8 @@ Find a shortest edge path, then unfold each traversed triangle into a plane by
 solving a two-circle intersection across the shared edge. The straight-line
 distance between the unfolded endpoints is the exact shortest path *within
 that face strip*. For arbitrary face sequences found by graph Dijkstra this is
-an upper bound on the true continuous geodesic; a full MMP sequence-tree
-implementation is future work.
+an upper bound on the true continuous geodesic. The full window-propagation
+MMP distance is available from `geomlib_geodesic_mmp`.
 
 ## API / constraints
 

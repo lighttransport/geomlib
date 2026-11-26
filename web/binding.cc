@@ -1853,6 +1853,41 @@ val reconstructRBF(val points) {
     return result;
 }
 
+val metricDemo() {
+    geomlib_metric3 M=geomlib_metric_diagonal(4.0,1.0,0.25);
+    double d=geomlib_metric_distance(M,geomlib_vec3_create(0,0,0),
+                                     geomlib_vec3_create(2,3,6));
+    double a=geomlib_metric_anisotropy(M);
+    val result=val::object();
+    result.set("success",std::fabs(d-std::sqrt(34.0))<1e-4 &&
+                         std::fabs(a-4.0)<1e-4);
+    result.set("distance",d);
+    return result;
+}
+
+val geodesicMmpDemo() {
+    geomlib_trimesh cube;
+    geomlib_trimesh_init(&cube, 8, 12);
+    geomlib_vec3 v[8]={
+        geomlib_vec3_create(0,0,0),geomlib_vec3_create(1,0,0),
+        geomlib_vec3_create(1,1,0),geomlib_vec3_create(0,1,0),
+        geomlib_vec3_create(0,0,1),geomlib_vec3_create(1,0,1),
+        geomlib_vec3_create(1,1,1),geomlib_vec3_create(0,1,1)};
+    for (int i=0;i<8;++i) geomlib_trimesh_add_vertex(&cube,v[i],nullptr,nullptr);
+    int f[12][3]={{0,1,2},{0,2,3},{4,6,5},{4,7,6},{0,4,5},{0,5,1},
+                  {3,2,6},{3,6,7},{0,3,7},{0,7,4},{1,5,6},{1,6,2}};
+    for (int i=0;i<12;++i)
+        geomlib_trimesh_add_triangle(&cube,f[i][0],f[i][1],f[i][2]);
+    double len=0.0;
+    int rc=geomlib_geodesic_mmp(&cube,0,6,&len);
+    val result=val::object();
+    result.set("success",rc==GEOMLIB_MESH_SUCCESS &&
+                         std::fabs(len-2.2360679)<1e-4);
+    result.set("length",len);
+    geomlib_trimesh_free(&cube);
+    return result;
+}
+
 val circleEllipseDemo() {
     geomlib_circle_ellipse_result r;
     int hit=geomlib_circle_ellipse_overlap(
@@ -4693,6 +4728,8 @@ EMSCRIPTEN_BINDINGS(geomlib) {
     function("circleAreaDemo", &circleAreaDemo);
     function("polygonIntersectionAreaDemo", &polygonIntersectionAreaDemo);
     function("circleEllipseDemo", &circleEllipseDemo);
+    function("geodesicMmpDemo", &geodesicMmpDemo);
+    function("metricDemo", &metricDemo);
     function("reconstructRBF", &reconstructRBF);
 
     // Memory-buffer I/O and robust predicates

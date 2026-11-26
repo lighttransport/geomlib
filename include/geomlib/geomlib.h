@@ -219,5 +219,7 @@
 #include "geomlib_circle_area.h"
 #include "geomlib_polygon_intersection_area.h"
 #include "geomlib_circle_ellipse.h"
+#include "geomlib_geodesic_mmp.h"
+#include "geomlib_metric.h"
 
 #endif /* GEOMLIB_H */

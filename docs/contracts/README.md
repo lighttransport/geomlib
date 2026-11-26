@@ -190,4 +190,6 @@ from the Lean formalization (`formal/`) rather than transcribed.
 - [Circle intersection and union area](circle_area.md) — done (Wave 3).
 - [Convex polygon intersection area](polygon_intersection_area.md) — done (Wave 3).
 - [Circle–ellipse overlap](circle_ellipse.md) — done (Wave 3).
+- [MMP continuous geodesic](geodesic_mmp.md) — done (Wave 3).
+- [Anisotropic metric tensors](metric.md) — done (Wave 3).
 - Future: anisotropic metric-tensor remeshing (restricted Voronoi diagrams).

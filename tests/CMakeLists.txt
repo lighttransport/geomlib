@@ -761,3 +761,11 @@ add_test(NAME test_polygon_intersection_area COMMAND test_polygon_intersection_a
 add_executable(test_circle_ellipse test_circle_ellipse.cpp)
 target_link_libraries(test_circle_ellipse PRIVATE geomlib)
 add_test(NAME test_circle_ellipse COMMAND test_circle_ellipse)
+
+add_executable(test_geodesic_mmp test_geodesic_mmp.cpp)
+target_link_libraries(test_geodesic_mmp PRIVATE geomlib)
+add_test(NAME test_geodesic_mmp COMMAND test_geodesic_mmp)
+
+add_executable(test_metric test_metric.cpp)
+target_link_libraries(test_metric PRIVATE geomlib)
+add_test(NAME test_metric COMMAND test_metric)
