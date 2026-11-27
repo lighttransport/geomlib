@@ -78,3 +78,20 @@ web/demo/public/*.js
 
 # Local tooling state
 .commandcode/
+.claude/
+.codex/
+
+# Local development notes
+/PHASE_1_2_ROADMAP.md
+
+# Generated build metadata
+*.ninja_deps
+*.ninja_log
+build.ninja
+compile_commands.json
+
+# Python cache/build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
